@@ -1115,6 +1115,19 @@ test('Hamburger menu Call Report navigation works cleanly (incl. <base target="_
   const iconMatches = crHtml.match(/<link rel="icon"/g) || [];
   assert.equal(iconMatches.length, 1, 'CallReport.html must have exactly one favicon link');
   assert.ok(crHtml.includes('if (window.parent && window.parent !== window) return;'), 'CallReport.html skips back bar when embedded in srcdoc iframe');
+
+  // Built Index.html's pages/callReport.js block must be 100% safe for Google Apps Script's
+  // HtmlService sanitizer (no raw <script>/<\/script> tags, no backticks, no /<\//g regex, no // comments)
+  const idxHtml = fs.readFileSync(path.join(ROOT, 'apps-script-full/Index.html'), 'utf8');
+  const crScriptMatch = idxHtml.match(/<script>\/\* pages\/callReport\.js \*\/([\s\S]*?)<\/script>/);
+  assert.ok(crScriptMatch, 'Index.html must contain the inlined pages/callReport.js script block');
+  const crScript = crScriptMatch[1];
+  assert.equal(/<script/i.test(crScript), false, 'pages/callReport.js must not contain raw <script tag (breaks GAS HtmlService)');
+  assert.equal(/<\/script|<\\\/script/i.test(crScript), false, 'pages/callReport.js must not contain raw </script> or <\\/script> (breaks GAS HtmlService)');
+  assert.equal(crScript.includes('`'), false, 'pages/callReport.js must not contain backtick template literals (breaks GAS HtmlService ES5 sanitizer)');
+  assert.equal(/\/[^/\n]*\\\/\//.test(crScript), false, 'pages/callReport.js must not contain regex with // (breaks GAS HtmlService sanitizer)');
+  assert.equal(crScript.includes('//'), false, 'pages/callReport.js must not contain // sequences (breaks GAS HtmlService sanitizer)');
+  assert.ok(crScript.includes("App.register('callreport'"), 'pages/callReport.js registers callreport route');
   assert.equal(errors.length, 0);
 });
 
