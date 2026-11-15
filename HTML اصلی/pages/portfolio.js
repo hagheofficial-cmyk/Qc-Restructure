@@ -287,18 +287,18 @@ async function render(root, arg) {
     });
     // Use proportional widths instead of a hard minimum: all columns remain
     // within the profile viewport, including when a form has many criteria.
-    const weights = [3, 5, 3, 3, 2].concat(columns.map(() => 1), [3, 3, 7]);
+    const weights = [3, 5, 3, 2].concat(columns.map(() => 1), [3, 3, 7]);
     const totalWeight = weights.reduce((a, b) => a + b, 0);
     const multipleGroups = new Set(columns.map(c => c.form + '|' + c.team)).size > 1;
     return `<table class="tbl profile-call-table" id="pCallHistory">
       <colgroup>${weights.map(w => `<col style="width:${w * 100 / totalWeight}%">`).join('')}</colgroup>
       <thead>${columns.length ? `<tr><th class="profile-legend-head" colspan="${weights.length}"><div class="profile-criterion-legend">${columns.map((col, i) => `<span class="profile-legend-item"><b>${fa(i + 1)}</b> ${esc(col.label)}${multipleGroups ? ` <small>(${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</small>` : ''}</span>`).join('')}</div></th></tr>` : ''}
-      <tr><th>تاریخ بررسی</th><th>لید و شماره تماس</th><th>فرم</th><th>کارشناس QC</th><th>نمره</th>${columns.map((col, i) => `<th class="profile-criterion-head" title="${esc(col.label)} — ${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''}"><span aria-hidden="true">${fa(i + 1)}</span><span class="profile-visually-hidden"> ${esc(col.label)} (${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</span></th>`).join('')}<th>ردلاین</th><th>زمان تماس</th><th>کامنت QC</th></tr></thead>
+      <tr><th>تاریخ بررسی</th><th>لید و شماره تماس</th><th>فرم</th><th>نمره</th>${columns.map((col, i) => `<th class="profile-criterion-head" title="${esc(col.label)} — ${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''}"><span aria-hidden="true">${fa(i + 1)}</span><span class="profile-visually-hidden"> ${esc(col.label)} (${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</span></th>`).join('')}<th>ردلاین</th><th>زمان تماس</th><th>کامنت QC</th></tr></thead>
       <tbody>${historyCalls.map((row, index) => `<tr id="pCallDetails-${index}" class="profile-call-row">
           <td dir="ltr">${esc(fa(row.reviewDate || '—'))}</td>
           <td class="cell-main">${esc(row.leadName || '—')}<div class="cell-sub" dir="ltr">${esc(row.leadPhone || '—')}</div></td>
           <td>${esc(FORM_TYPE_FA[row.formType] || row.formType || '—')}</td>
-          <td>${esc(row.qcAgent || '—')}</td><td>${scorePill(row.score)}</td>
+          <td>${scorePill(row.score)}</td>
           ${columns.map(col => `<td class="profile-criterion-value">${matrix[index].has(col.identity) ? triValue(matrix[index].get(col.identity)) : '<span title="این المان برای این فرم نیست">·</span>'}</td>`).join('')}
           <td>${callRedlineBadge(row, index)}${row.redlineReason ? `<div class="profile-redline-reason">${esc(row.redlineReason)}</div>` : ''}</td>
           <td>${callTimeCell(row)}</td>
@@ -792,8 +792,8 @@ async function render(root, arg) {
   }
 
   /* ------------------------------ PDF ------------------------------
-   * PDF از همان تصویر کامل پرونده ساخته می‌شود تا متن فارسی درست بماند؛
-   * تصویر بلند به صفحه‌های A4 بریده می‌شود.
+   * PDF به‌صورت یکپارچه و بدون صفحه‌بندی (تک‌صفحه پیوسته) ساخته می‌شود تا هیچ
+   * جدولی وسط صفحه دو نیم نشود و متن فارسی دقیقاً مطابق تصویر بماند.
    */
   async function exportPdf() {
     if (!curData || !profileBody) return;
@@ -804,7 +804,7 @@ async function render(root, arg) {
       App.charts.forEach((chart) => { if (chart.update) chart.update('none'); });
       const name = `${curData.agent.name} — کارنامه ${curData.scope.from || 'ابتدا'} تا ${curData.scope.to || 'انتها'}`;
       const out = await QCCapture.downloadPdf(profileBody, name, revealAll);
-      toast.success(`فایل PDF آماده شد (${fa(out.pages)} صفحه)`);
+      toast.success(out.pages === 1 ? 'فایل PDF یکپارچه و بدون صفحه‌بندی آماده شد' : `فایل PDF آماده شد (${fa(out.pages)} صفحه)`);
     } catch (e) {
       toast.error(e.message);
     } finally {

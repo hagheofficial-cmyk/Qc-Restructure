@@ -30,7 +30,8 @@ for (const build of ['public', 'offline']) test(`${build}: profile and QC commen
   assert.equal(second.cells[teleCol].textContent, '·'); assert.equal(second.cells[accountCol].textContent, '0');
   const third = rows.find(r => r.textContent.includes('لید سوم'));
   assert.equal(third.cells[teleCol].textContent, '·'); assert.equal(third.cells[newTeleCol].textContent, '1');
-  assert.ok(first.textContent.includes('QC اول'));
+  assert.equal(headers.some(h => h.textContent.includes('کارشناس QC')), false, 'کارشناس QC column must be removed from call history');
+  assert.equal(first.textContent.includes('QC اول'), false, 'QC agent name must not appear in call history row');
   assert.ok(first.textContent.includes('۹۰ ثانیه')); assert.ok(first.textContent.includes('علت الف'));
   assert.ok(first.textContent.includes('یادداشت <img src=x onerror=alert(1)>')); assert.equal(first.querySelector('img,b'), null);
   assert.equal(first.querySelector('.profile-elements, table'), null);

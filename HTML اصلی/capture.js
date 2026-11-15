@@ -115,8 +115,12 @@ function tileEnd(offset, proposed, pageSize, blocks) {
   return end;
 }
 
-/* PDF به صورت تکه‌های مستقل ساخته می‌شود تا محدودیت اندازهٔ canvas
- * مرورگر باعث حذف انتهای پرونده‌های بلند نشود. */
+/* PDF یکپارچه و بدون صفحه‌بندی (تک‌صفحه پیوسته):
+ * کل کارنامه روی یک صفحه‌ی پیوسته با ارتفاع دقیق محتوا قرار می‌گیرد تا هیچ
+ * جدولی وسط صفحه دو نیم نشود. برای پایداری حافظه‌ی مرورگر در کارنامه‌های بلند،
+ * رندر DOM در نوارهای محدود (حداکثر ۶۰۰۰ پیکسل) انجام و بدون درز روی همان
+ * صفحه‌ی پیوسته چیده می‌شود. فقط در موارد بسیار استثنایی فراتر از سقف استاندارد
+ * PDF (۱۴۰۰۰ پوینت ≈ ۲۶۰۰۰ پیکسل)، برش در مرز ردیف/کارت انجام می‌شود. */
 async function downloadPdf(source, filename, prepare) {
   if (!source || !source.isConnected) throw new Error('پرونده‌ی آماده‌ای برای خروجی وجود ندارد');
   if (typeof window.html2canvas !== 'function') throw new Error('کتابخانه‌ی عکس بارگذاری نشده است');
@@ -130,54 +134,72 @@ async function downloadPdf(source, filename, prepare) {
     host.style.width = width + 'px';
     const height = Math.ceil(Math.max(host.scrollHeight, host.getBoundingClientRect().height));
     if (!width || !height) throw new Error('ابعاد محتوای PDF قابل محاسبه نیست');
-    const pdf = new lib({ unit: 'pt', format: 'a4', orientation: 'landscape', compress: true });
-    const pageWidth = pdf.internal.pageSize.getWidth(), pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 18, imageWidth = pageWidth - margin * 2;
-    const sliceHeight = Math.max(1, Math.floor(width * (pageHeight - margin * 2) / imageWidth));
-    const blocks = pageBreaks(host), pages = [];
-    let offset = 0;
-    while (offset < height) {
-      const proposed = Math.min(offset + sliceHeight, height);
-      const end = proposed < height ? tileEnd(offset, proposed, sliceHeight, blocks) : proposed;
-      pages.push({ y: offset, height: end - offset });
-      offset = end;
-    }
-    // Capture several pages at a time. Re-cloning the entire app for every
-    // page is extremely slow, but one canvas for an unlimited profile would
-    // exceed browser limits. Batch size and pixel area remain bounded.
-    const batchLimit = 6000;
-    for (let first = 0; first < pages.length;) {
-      let last = first + 1;
-      while (last < pages.length && pages[last].y + pages[last].height - pages[first].y <= batchLimit) last++;
-      const y = pages[first].y, batchHeight = pages[last - 1].y + pages[last - 1].height - y;
-      const scale = Math.min(1.2, 3000 / width, 6000 / batchHeight, Math.sqrt(12000000 / (width * batchHeight)));
-      const canvas = await window.html2canvas(host, {
-        backgroundColor: themeBackground(), scale, useCORS: true, logging: false,
-        width, height: batchHeight, x: 0, y,
-        windowWidth: window.innerWidth, windowHeight: window.innerHeight, scrollX: 0, scrollY: 0,
-        onclone: (doc, clonedHost) => {
-          if (clonedHost && clonedHost.parentNode === doc.body) {
-            [...doc.body.children].forEach(node => { if (node !== clonedHost && node.tagName !== 'STYLE') node.remove(); });
-          }
-        }
-      });
-      if (!canvas.width || !canvas.height) throw new Error('تصویر یکی از صفحه‌های PDF ساخته نشد');
-      for (let index = first; index < last; index++) {
-        const page = pages[index];
-        const from = Math.round((page.y - y) * canvas.height / batchHeight);
-        const to = Math.round((page.y + page.height - y) * canvas.height / batchHeight);
-        const slice = document.createElement('canvas');
-        slice.width = canvas.width; slice.height = Math.max(1, to - from);
-        const context = slice.getContext('2d');
-        if (!context) throw new Error('ساخت تصویر PDF ممکن نشد');
-        context.fillStyle = themeBackground(); context.fillRect(0, 0, slice.width, slice.height);
-        context.drawImage(canvas, 0, from, canvas.width, slice.height, 0, 0, slice.width, slice.height);
-        if (index) pdf.addPage();
-        pdf.addImage(slice.toDataURL('image/jpeg', 0.94), 'JPEG', margin, margin, imageWidth, page.height * imageWidth / width);
-        slice.width = slice.height = 0;
+
+    const bg = themeBackground();
+    const pageWidth = 842; // عرض استاندارد A4 افقی برای خوانایی کامل جدول‌ها
+    const margin = 18;
+    const imageWidth = pageWidth - margin * 2;
+    const ptPerPx = imageWidth / width;
+    const MAX_PDF_PAGE_PT = 14000; // سقف استاندارد PDF 1.7 (حداکثر ۱۴۴۰۰ پوینت)
+    const maxSlicePx = Math.max(1, Math.floor((MAX_PDF_PAGE_PT - margin * 2) / ptPerPx));
+
+    const pages = [];
+    if (height <= maxSlicePx) {
+      pages.push({ y: 0, height });
+    } else {
+      const blocks = pageBreaks(host);
+      let offset = 0;
+      while (offset < height) {
+        const proposed = Math.min(offset + maxSlicePx, height);
+        const end = proposed < height ? tileEnd(offset, proposed, maxSlicePx, blocks) : proposed;
+        pages.push({ y: offset, height: Math.max(1, end - offset) });
+        offset = end;
       }
-      canvas.width = canvas.height = 0;
-      first = last;
+    }
+
+    const orientFor = (w, h) => (w >= h ? 'landscape' : 'portrait');
+    const pageHeightOf = (slicePx) => Math.max(100, Math.ceil(slicePx * ptPerPx + margin * 2));
+    const paintBg = (doc, w, h) => {
+      if (typeof doc.setFillColor === 'function' && typeof doc.rect === 'function') {
+        try { doc.setFillColor(bg); doc.rect(0, 0, w, h, 'F'); } catch (e) {}
+      }
+    };
+
+    const firstH = pageHeightOf(pages[0].height);
+    const pdf = new lib({ unit: 'pt', format: [pageWidth, firstH], orientation: orientFor(pageWidth, firstH), compress: true });
+    paintBg(pdf, pageWidth, firstH);
+
+    // نوارهای رندر محدود تا سقف canvas مرورگر هیچ‌گاه سرریز نشود.
+    const stripLimit = 6000;
+    for (let pIndex = 0; pIndex < pages.length; pIndex++) {
+      const page = pages[pIndex];
+      const curPageH = pageHeightOf(page.height);
+      if (pIndex > 0) {
+        pdf.addPage([pageWidth, curPageH], orientFor(pageWidth, curPageH));
+        paintBg(pdf, pageWidth, curPageH);
+      }
+      let stripOffset = 0;
+      while (stripOffset < page.height) {
+        const stripH = Math.min(stripLimit, page.height - stripOffset);
+        const y = page.y + stripOffset;
+        const scale = Math.min(1.5, 3200 / width, 6000 / stripH, Math.sqrt(14000000 / (width * stripH)));
+        const canvas = await window.html2canvas(host, {
+          backgroundColor: bg, scale, useCORS: true, logging: false,
+          width, height: stripH, x: 0, y,
+          windowWidth: window.innerWidth, windowHeight: window.innerHeight, scrollX: 0, scrollY: 0,
+          onclone: (doc, clonedHost) => {
+            if (clonedHost && clonedHost.parentNode === doc.body) {
+              [...doc.body.children].forEach(node => { if (node !== clonedHost && node.tagName !== 'STYLE') node.remove(); });
+            }
+          }
+        });
+        if (!canvas.width || !canvas.height) throw new Error('تصویر فایل PDF ساخته نشد');
+        const pdfY = margin + stripOffset * ptPerPx;
+        const pdfH = stripH * ptPerPx;
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, pdfY, imageWidth, pdfH);
+        canvas.width = canvas.height = 0;
+        stripOffset += stripH;
+      }
     }
     pdf.save(fileName(filename, 'pdf'));
     return { pages: pages.length, width, height };

@@ -503,9 +503,18 @@
                 <span class="step-badge">۱</span>
                 مدیریت لیست کارشناسان، تیم‌ها و تیم‌های زیر مجموعه (جدول ثابت و قابل ویرایش)
             </h2>
-            <p style="color:var(--cr-muted,#94a3b8); margin-top:-15px; margin-bottom:18px;">
-                اطلاعات وارد شده در مرورگر شما ذخیره می‌شود تا در مراجعات بعدی نیازی به وارد کردن مجدد نباشد. همچنین می‌توانید از فایل اکسل یا تکست‌باکس استفاده کنید.
+            <p style="color:var(--cr-muted,#94a3b8); margin-top:-15px; margin-bottom:14px;">
+                اطلاعات وارد شده در مرورگر شما ذخیره می‌شود تا در مراجعات بعدی نیازی به وارد کردن مجدد نباشد. همچنین می‌توانید از فایل اکسل، تکست‌باکس یا مستقیم از کارشناسان ثبت‌شده روی سیستم استفاده کنید.
             </p>
+            <div id="systemAgentsQuickBox" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:14px 16px; margin-bottom:16px; border-radius:12px; border:1px solid rgba(56,189,248,.4); background:rgba(14,165,233,.1);">
+                <div style="flex:1; min-width:240px;">
+                    <div style="font-weight:700; color:#38bdf8; margin-bottom:4px;"><i class="fas fa-users-cog"></i> ایمپورت خودکار از «مدیریت کارشناسان» سامانه</div>
+                    <div style="font-size:.86rem; color:var(--cr-muted,#94a3b8);">بدون نیاز به آپلود فایل اکسل کارشناسان، نام، داخلی و تیم تمامی کارشناسان ثبت‌شده روی سیستم وارد شده و بلافاصله به مرحله آپلود فایل گزارش تماس می‌روید.</div>
+                </div>
+                <button type="button" id="btnUseSystemAgents" onclick="useSystemRegisteredExperts(true)" class="btn btn-success" style="padding:10px 18px; font-weight:700;">
+                    <i class="fas fa-cloud-download-alt"></i> استفاده از کارشناسان ثبت‌شده روی سیستم
+                </button>
+            </div>
             <div class="tabs">
                 <button class="tab-btn active" onclick="switchTab('tab-table')"><i class="fas fa-table"></i> جدول ثابت کارشناسان (ویرایش سریع)</button>
                 <button class="tab-btn" onclick="switchTab('tab-text')"><i class="fas fa-paste"></i> ورود گروهی متنی (تکست‌باکس)</button>
@@ -514,8 +523,9 @@
             <!-- Tab 1: Editable Table -->
             <div id="tab-table" class="tab-content active">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
-                    <div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
                         <button onclick="addExpertRow()" class="btn btn-primary" style="padding:8px 14px;"><i class="fas fa-plus"></i> افزودن کارشناس جدید</button>
+                        <button type="button" id="btnImportSystemToTable" onclick="useSystemRegisteredExperts(false)" class="btn btn-success" style="padding:8px 14px;"><i class="fas fa-users"></i> ایمپورت کارشناسان سیستم در جدول</button>
                         <button onclick="loadSampleExperts()" class="btn btn-secondary" style="padding:8px 14px;"><i class="fas fa-magic"></i> بارگذاری ۲۱ کارشناس نمونه</button>
                     </div>
                     <div style="display:flex; gap:8px;">
@@ -568,7 +578,8 @@
                     <p style="color:var(--cr-muted,#94a3b8); margin:0;">ستون‌های مجاز: CallerID (یا داخلی)، نام کارشناس، تیم اصلی، تیم زیر مجموعه</p>
                     <input type="file" id="mappingFileInput" accept=".xlsx,.xls" style="display:none;" onchange="handleExpertExcelUpload(event)">
                 </div>
-                <div style="margin-top:15px; text-align:center;">
+                <div style="margin-top:15px; display:flex; justify-content:center; gap:10px; flex-wrap:wrap;">
+                    <button type="button" id="btnUseSystemAgentsExcel" onclick="useSystemRegisteredExperts(true)" class="btn btn-primary"><i class="fas fa-cloud-download-alt"></i> استفاده از کارشناسان ثبت‌شده روی سیستم</button>
                     <button onclick="downloadExpertTemplate()" class="btn btn-success"><i class="fas fa-download"></i> دانلود فایل اکسل کارشناسان (شامل ۲۱ نمونه کامل برای ورود اطلاعات)</button>
                 </div>
             </div>
@@ -583,6 +594,7 @@
                 </h2>
                 <button onclick="backToStep1()" class="btn btn-secondary"><i class="fas fa-arrow-right"></i> بازگشت به ویرایش کارشناسان</button>
             </div>
+            <div id="step2SystemBanner" style="display:none; padding:12px 15px; margin-bottom:16px; border-radius:10px; border:1px solid rgba(74,222,128,.4); background:rgba(34,197,94,.12); color:#4ade80; font-weight:600; font-size:.92rem;"></div>
             <div class="upload-area" id="dropArea2" onclick="document.getElementById('fileInput').click()">
                 <i class="fas fa-cloud-upload-alt" style="font-size:4.5rem; color:#60a5fa; margin-bottom:12px;"></i>
                 <h2 style="margin:0 0 8px 0;">فایل گزارش تماس‌ها را انتخاب کنید</h2>
@@ -1748,6 +1760,66 @@
             renderExpertEditTable();
             showStep1Status('✅ ۲۱ کارشناس نمونه با موفقیت بارگذاری شد.', '#4ade80');
         }
+        async function useSystemRegisteredExperts(proceedToStep2) {
+            const buttons = [
+                document.getElementById('btnUseSystemAgents'),
+                document.getElementById('btnUseSystemAgentsExcel'),
+                document.getElementById('btnImportSystemToTable')
+            ].filter(Boolean);
+            buttons.forEach(b => { b.disabled = true; });
+            showStep1Status('⏳ در حال دریافت فهرست کارشناسان ثبت‌شده از مدیریت کارشناسان سیستم…', '#38bdf8');
+            try {
+                const rawAgents = (window.QCSystemAgents && typeof window.QCSystemAgents.load === 'function')
+                    ? await window.QCSystemAgents.load()
+                    : null;
+                if (!Array.isArray(rawAgents) || rawAgents.length === 0) {
+                    showStep1Status('⚠️ کارشناسی از بخش «مدیریت کارشناسان» سیستم دریافت نشد. ابتدا کارشناسان را در مدیریت کارشناسان ثبت کنید یا از اکسل استفاده کنید.', '#fbbf24');
+                    return;
+                }
+                const activeList = rawAgents.filter(a => a && a.active !== false);
+                const sourceList = activeList.length > 0 ? activeList : rawAgents;
+                const toEnDigits = (v) => (window.QCCalc && typeof window.QCCalc.faToEn === 'function') ? window.QCCalc.faToEn(String(v)) : String(v);
+                const imported = [];
+                sourceList.forEach(a => {
+                    if (!a) return;
+                    const id = (a.ext != null && String(a.ext).trim() !== '') ? toEnDigits(a.ext).trim() : '';
+                    const name = String(a.name || '').trim();
+                    if (!id && !name) return;
+                    let team = String(a.team || 'بدون تیم').trim();
+                    let subTeam = String(a.subgroup || 'تیم زیر مجموعه عمومی').trim();
+                    if (currentTeamAccessProfile && currentTeamAccessProfile.isRestricted) {
+                        if (currentTeamAccessProfile.teamName && normalizeStr(team) !== normalizeStr(currentTeamAccessProfile.teamName)) return;
+                        team = currentTeamAccessProfile.teamName || team;
+                        if (currentTeamAccessProfile.subTeamName) subTeam = currentTeamAccessProfile.subTeamName;
+                    }
+                    imported.push({ id, name, team, subTeam });
+                });
+                if (imported.length === 0) {
+                    showStep1Status('⚠️ کارشناس مطابقی برای تیم انتخابی در مدیریت کارشناسان سیستم یافت نشد.', '#fbbf24');
+                    return;
+                }
+                expertsList = imported;
+                renderExpertEditTable();
+                saveExpertsToStorage();
+                const withExt = imported.filter(e => e.id).length;
+                const msg = `✅ ${imported.length} کارشناس ثبت‌شده از «مدیریت کارشناسان» سیستم وارد شد (${withExt} نفر دارای داخلی).`;
+                const banner = document.getElementById('step2SystemBanner');
+                if (banner) {
+                    banner.innerHTML = `<i class="fas fa-check-circle"></i> ${msg} اکنون فایل اکسل گزارش تماس را برای تحلیل انتخاب کنید.`;
+                    banner.style.display = 'block';
+                }
+                if (proceedToStep2) {
+                    saveExpertsAndProceed();
+                } else {
+                    switchTab('tab-table');
+                    showStep1Status(msg, '#4ade80');
+                }
+            } catch (err) {
+                showStep1Status('❌ خطا در دریافت کارشناسان از سیستم: ' + (err && err.message ? err.message : err), '#f87171');
+            } finally {
+                buttons.forEach(b => { b.disabled = false; });
+            }
+        }
         function saveExpertsToStorage() {
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(expertsList));
         }
@@ -1947,6 +2019,8 @@
         }
         function backToStep1() {
             if (currentTeamAccessProfile && currentTeamAccessProfile.isRestricted) return; // expert management is admin-only
+            const banner = document.getElementById('step2SystemBanner');
+            if (banner) banner.style.display = 'none';
             document.getElementById('step2Panel').style.display = 'none';
             document.getElementById('step1Panel').style.display = 'block';
         }
@@ -3302,49 +3376,59 @@
         async function downloadAllPDF() {
             if (allResults.length === 0) return alert('هیچ داده‌ای برای خروجی وجود ندارد.');
             const { jsPDF } = window.jspdf;
-            const pdf = new jsPDF('l', 'mm', 'a4');
             const overlay = document.getElementById('progressOverlay');
             const pTitle = document.getElementById('progressTitle');
             const pDetail = document.getElementById('progressDetail');
             const pFill = document.getElementById('progressBarFill');
             overlay.style.display = 'flex';
-            pTitle.innerText = 'در حال ساخت گزارش رسمی چندصفحه‌ای PDF...';
-            pDetail.innerText = 'صفحه ۱: در حال رندر داشبورد تحلیلی و نمودارها...';
-            pFill.style.width = '25%';
+            pTitle.innerText = 'در حال ساخت گزارش یکپارچه PDF (بدون صفحه‌بندی)...';
+            pDetail.innerText = 'مرحله ۱ از ۲: رندر داشبورد تحلیلی و نمودارها...';
+            pFill.style.width = '30%';
             try {
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = pdf.internal.pageSize.getHeight();
-                const margin = 10;
+                const bg = document.documentElement.dataset.theme === 'light' ? '#f8fafc' : '#0f172a';
+                const pdfWidth = 297; // mm (عرض استاندارد A4 افقی)
+                const margin = 8;
+                const gap = 8;
                 const printWidth = pdfWidth - margin * 2;
                 const dashEl = document.getElementById('executiveDashboardContainer');
-                const dashCanvas = await html2canvas(dashEl, { scale: 2.2, backgroundColor: '#0f172a' });
-                const dashImg = dashCanvas.toDataURL('image/png');
+                const dashCanvas = await html2canvas(dashEl, { scale: 2, backgroundColor: bg });
+                const dashImg = dashCanvas.toDataURL('image/jpeg', 0.95);
                 const dashImgHeight = (dashCanvas.height * printWidth) / dashCanvas.width;
-                
-                pdf.addImage(dashImg, 'PNG', margin, margin, printWidth, Math.min(dashImgHeight, pdfHeight - margin * 2));
-                pDetail.innerText = 'صفحه ۲: در حال رندر جدول کامل جزئیات عملکرد کارشناسان...';
+
+                pDetail.innerText = 'مرحله ۲ از ۲: رندر کامل جدول عملکرد کارشناسان بدون شکست صفحه...';
                 pFill.style.width = '70%';
-                await new Promise(r => setTimeout(r, 250));
-                pdf.addPage();
+                await new Promise(r => setTimeout(r, 120));
                 const tableCanvas = await captureTableCanvasClean();
-                const tableImg = tableCanvas.toDataURL('image/png');
+                const tableImg = tableCanvas.toDataURL('image/jpeg', 0.95);
                 const tableImgHeight = (tableCanvas.height * printWidth) / tableCanvas.width;
-                if (tableImgHeight <= pdfHeight - margin * 2) {
-                    pdf.addImage(tableImg, 'PNG', margin, margin, printWidth, tableImgHeight);
+
+                // یک صفحه‌ی پیوسته‌ی یکپارچه بدون صفحه‌بندی تا هیچ جدولی وسط صفحه دو نیم نشود
+                // (سقف استاندارد PDF: ۱۴۴۰۰ پوینت ≈ ۵۰۸۰ میلی‌متر)
+                const totalHeight = Math.ceil(margin * 2 + dashImgHeight + gap + tableImgHeight);
+                const MAX_MM = 4900;
+                const orient = (w, h) => (w >= h ? 'l' : 'p');
+                if (totalHeight <= MAX_MM) {
+                    const pdf = new jsPDF({ orientation: orient(pdfWidth, totalHeight), unit: 'mm', format: [pdfWidth, totalHeight], compress: true });
+                    pdf.setFillColor(bg);
+                    pdf.rect(0, 0, pdfWidth, totalHeight, 'F');
+                    pdf.addImage(dashImg, 'JPEG', margin, margin, printWidth, dashImgHeight);
+                    pdf.addImage(tableImg, 'JPEG', margin, margin + dashImgHeight + gap, printWidth, tableImgHeight);
+                    pFill.style.width = '100%';
+                    pdf.save('گزارش_جامع_مدیریتی_تیم_فروش.pdf');
                 } else {
-                    let heightLeft = tableImgHeight;
-                    let position = margin;
-                    let pageNum = 0;
-                    while (heightLeft > 0) {
-                        if (pageNum > 0) pdf.addPage();
-                        pdf.addImage(tableImg, 'PNG', margin, position, printWidth, tableImgHeight);
-                        heightLeft -= (pdfHeight - margin * 2);
-                        position -= (pdfHeight - margin * 2);
-                        pageNum++;
-                    }
+                    const h1 = Math.ceil(margin * 2 + dashImgHeight);
+                    const pdf = new jsPDF({ orientation: orient(pdfWidth, h1), unit: 'mm', format: [pdfWidth, h1], compress: true });
+                    pdf.setFillColor(bg);
+                    pdf.rect(0, 0, pdfWidth, h1, 'F');
+                    pdf.addImage(dashImg, 'JPEG', margin, margin, printWidth, dashImgHeight);
+                    const h2 = Math.min(MAX_MM, Math.ceil(margin * 2 + tableImgHeight));
+                    pdf.addPage([pdfWidth, h2], orient(pdfWidth, h2));
+                    pdf.setFillColor(bg);
+                    pdf.rect(0, 0, pdfWidth, h2, 'F');
+                    pdf.addImage(tableImg, 'JPEG', margin, margin, printWidth, Math.min(tableImgHeight, h2 - margin * 2));
+                    pFill.style.width = '100%';
+                    pdf.save('گزارش_جامع_مدیریتی_تیم_فروش.pdf');
                 }
-                pFill.style.width = '100%';
-                pdf.save('گزارش_جامع_مدیریتی_تیم_فروش.pdf');
             } catch(e) {
                 alert('خطا در ساخت گزارش PDF: ' + e.message);
             } finally {

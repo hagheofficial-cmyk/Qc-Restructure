@@ -49,11 +49,105 @@ function apply(value) {
   checkLegacySummary();
 }
 window.QCReportRange = { matches, afterRecompute: checkLegacySummary };
+
+/* ---------------- پل دریافت کارشناسان ثبت‌شده در مدیریت کارشناسان ---------------- */
+let cachedSystemAgents = Array.isArray(window.__QC_SYSTEM_AGENTS__) ? window.__QC_SYSTEM_AGENTS__ : null;
+const pendingAgentRequests = new Map();
+let agentReqSeq = 0;
+
+function readStoredAuthToken() {
+  for (const store of [() => window.localStorage, () => window.sessionStorage]) {
+    try {
+      const raw = store().getItem('crmqc.auth.v1');
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.token) return String(parsed.token);
+    } catch (e) {}
+  }
+  return '';
+}
+
+function requestAgentsFromParent() {
+  return new Promise((resolve) => {
+    if (!window.parent || window.parent === window) { resolve(null); return; }
+    const requestId = 'sa_' + (++agentReqSeq) + '_' + Date.now();
+    const timer = setTimeout(() => {
+      pendingAgentRequests.delete(requestId);
+      resolve(null);
+    }, 2500);
+    pendingAgentRequests.set(requestId, (agents) => {
+      clearTimeout(timer);
+      pendingAgentRequests.delete(requestId);
+      resolve(Array.isArray(agents) ? agents : null);
+    });
+    try {
+      const target = (location.origin && location.origin !== 'null' && location.protocol !== 'file:') ? location.origin : '*';
+      window.parent.postMessage({ type: 'qc:request-system-agents', requestId }, target);
+    } catch (e) {
+      clearTimeout(timer);
+      pendingAgentRequests.delete(requestId);
+      resolve(null);
+    }
+  });
+}
+
+async function loadSystemAgents() {
+  // ۱) درخواست زنده از سامانه والد (هم در Node/Offline و هم در Google Apps Script)
+  const fromParent = await requestAgentsFromParent();
+  if (Array.isArray(fromParent) && fromParent.length) {
+    cachedSystemAgents = fromParent;
+    return fromParent;
+  }
+  // ۲) خواندن مستقیم از والد هم‌دامنه (در صورت باز بودن داخل iframe هم‌ریشه)
+  try {
+    if (window.parent && window.parent !== window && window.parent.App && window.parent.App.state && Array.isArray(window.parent.App.state.agents)) {
+      if (window.parent.App.state.agents.length) {
+        cachedSystemAgents = window.parent.App.state.agents;
+        return cachedSystemAgents;
+      }
+    }
+  } catch (e) {}
+  // ۳) درخواست مستقیم به /api/agents (وقتی گزارش تماس در تب جدید سرور Node باز شده باشد)
+  if (location.protocol === 'http:' || location.protocol === 'https:') {
+    try {
+      const token = readStoredAuthToken();
+      const headers = token ? { 'x-qc-token': token } : undefined;
+      const res = await fetch('/api/agents', { headers });
+      if (res.ok) {
+        const list = await res.json();
+        if (Array.isArray(list)) {
+          cachedSystemAgents = list;
+          return list;
+        }
+      }
+    } catch (e) {}
+  }
+  // ۴) کش دریافتی از والد یا تزریق اولیه Apps Script
+  if (Array.isArray(cachedSystemAgents)) return cachedSystemAgents;
+  if (Array.isArray(window.__QC_SYSTEM_AGENTS__)) return window.__QC_SYSTEM_AGENTS__;
+  if (Array.isArray(fromParent)) return fromParent;
+  return null;
+}
+
+window.QCSystemAgents = {
+  load: loadSystemAgents,
+  getCached: () => cachedSystemAgents
+};
+
 window.addEventListener('message', (event) => {
   if (event.source !== window.parent || !event.data) return;
-  if (location.protocol !== 'file:' && event.origin !== location.origin) return;
-  if(event.data.type === 'crmqc:theme') { document.documentElement.dataset.theme = event.data.theme === 'light' ? 'light' : 'dark'; if(typeof avgDurationChart !== 'undefined' && avgDurationChart && avgDurationChart.update) avgDurationChart.update('none'); return; }
-  if(event.data.type === 'crmqc:date-range') apply(event.data.range || {});
+  if (location.protocol !== 'file:' && location.origin !== 'null' && event.origin !== location.origin) return;
+  if (event.data.type === 'crmqc:theme') { document.documentElement.dataset.theme = event.data.theme === 'light' ? 'light' : 'dark'; if (typeof avgDurationChart !== 'undefined' && avgDurationChart && avgDurationChart.update) avgDurationChart.update('none'); return; }
+  if (event.data.type === 'crmqc:date-range') { apply(event.data.range || {}); return; }
+  if (event.data.type === 'crmqc:system-agents' && Array.isArray(event.data.agents)) {
+    cachedSystemAgents = event.data.agents;
+    const reqId = event.data.requestId;
+    if (reqId && pendingAgentRequests.has(reqId)) {
+      pendingAgentRequests.get(reqId)(event.data.agents);
+    } else if (pendingAgentRequests.size) {
+      pendingAgentRequests.forEach((fn) => fn(event.data.agents));
+    }
+  }
 });
 window.addEventListener('DOMContentLoaded', () => apply(sourceRange));
 /* در حالت جاسازی‌شده (iframe داخلی سامانه) نشانی، search ندارد؛ پارامترها از

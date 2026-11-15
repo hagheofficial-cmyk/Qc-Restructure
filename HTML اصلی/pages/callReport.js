@@ -12,6 +12,14 @@ const { $, esc } = UI;
 const STANDALONE = !!(window.APP_SCRIPT_MODE && window.APP_SCRIPT_URL);
 const SRC = STANDALONE ? window.APP_SCRIPT_URL + '#/callreport' : 'call-admin-report.html';
 
+async function loadSystemAgents() {
+  try {
+    const list = await UI.api.get('/api/agents');
+    if (Array.isArray(list)) return list;
+  } catch (e) {}
+  return (App.state && Array.isArray(App.state.agents)) ? App.state.agents : [];
+}
+
 function rangeSource() {
   if (STANDALONE) return SRC; // New tab enters the authenticated SPA, never a public report URL.
   const params = new URLSearchParams();
@@ -44,12 +52,30 @@ function render(root) {
     </div>`;
 
   const frame = $('#crFrame', root);
+  const targetOrigin = () => (location.origin === 'null' ? '*' : location.origin);
+  const postAgents = async (requestId) => {
+    if (!frame.isConnected || !frame.contentWindow) return;
+    const agents = await loadSystemAgents();
+    if (!frame.isConnected || !frame.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage({ type: 'crmqc:system-agents', agents, requestId: requestId || null }, targetOrigin());
+    } catch (e) {}
+  };
   const syncRange = () => {
     if (!frame.isConnected || !frame.contentWindow) return;
     $('#crNewTab', root).href = rangeSource();
-    frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: App.theme }, location.origin === 'null' ? '*' : location.origin);
-    frame.contentWindow.postMessage({ type: 'crmqc:date-range', range: App.dateRange }, location.origin === 'null' ? '*' : location.origin);
+    frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: App.theme }, targetOrigin());
+    frame.contentWindow.postMessage({ type: 'crmqc:date-range', range: App.dateRange }, targetOrigin());
+    postAgents();
   };
+  const onMsg = (event) => {
+    if (!root.isConnected) { window.removeEventListener('message', onMsg); return; }
+    const data = event.data || {};
+    if (data.type === 'qc:request-system-agents' && frame && event.source === frame.contentWindow) {
+      postAgents(data.requestId);
+    }
+  };
+  window.addEventListener('message', onMsg);
   frame.addEventListener('load', syncRange);
   App.onDateRangeChange(syncRange);
   $('#crReload').addEventListener('click', () => { frame.src = rangeSource(); });
@@ -137,7 +163,9 @@ function renderStandalone(root) {
     const target = reportTarget && reportTarget.isConnected ? reportTarget : wrap;
     if (!target || !target.isConnected) return;
     const doc = String(html || '');
-    const withParams = `<script>window.__QC_CALL_REPORT_PARAMS__ = ${JSON.stringify('?' + params.toString())};</script>`;
+    const initialAgents = (App.state && Array.isArray(App.state.agents)) ? App.state.agents : [];
+    const safeJson = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
+    const withParams = `<script>window.__QC_CALL_REPORT_PARAMS__ = ${safeJson('?' + params.toString())};window.__QC_SYSTEM_AGENTS__ = ${safeJson(initialAgents)};</script>`;
     const full = doc.indexOf('<head>') >= 0
       ? doc.replace('<head>', '<head>' + bridgeScript() + withParams)
       : bridgeScript() + withParams + doc;
@@ -150,6 +178,9 @@ function renderStandalone(root) {
       try {
         frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: App.theme }, '*');
         frame.contentWindow.postMessage({ type: 'crmqc:date-range', range: App.dateRange }, '*');
+        loadSystemAgents().then((agents) => {
+          try { if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type: 'crmqc:system-agents', agents }, '*'); } catch (e) {}
+        });
       } catch (e) { /* بی‌اثر */ }
     });
     target.innerHTML = '';
@@ -192,12 +223,23 @@ function renderStandalone(root) {
       .getCallReportHtml(token);
   }
 
-  /* ذخیره‌ی تنظیمات ابزار (کارشناسان/دسترسی‌ها) از داخل iframe به شیت */
+  /* ذخیره‌ی تنظیمات ابزار (کارشناسان/دسترسی‌ها) و ارسال فهرست کارشناسان سیستم به iframe */
   const onMessage = (event) => {
     /* صفحه که عوض شود، گوش‌دهنده خودش بازنشسته می‌شود */
     if (!root.isConnected) { window.removeEventListener('message', onMessage); return; }
     const data = event.data || {};
-    if (data.type !== 'qc:callreport-save' || !frame || event.source !== frame.contentWindow) return;
+    if (!frame || event.source !== frame.contentWindow) return;
+    if (data.type === 'qc:request-system-agents') {
+      loadSystemAgents().then((agents) => {
+        try {
+          if (frame && frame.contentWindow) {
+            frame.contentWindow.postMessage({ type: 'crmqc:system-agents', agents, requestId: data.requestId || null }, '*');
+          }
+        } catch (e) {}
+      });
+      return;
+    }
+    if (data.type !== 'qc:callreport-save') return;
     if (!(window.google && google.script && google.script.run)) return;
     google.script.run
       .withFailureHandler(() => UI.toast('ذخیره تنظیمات گزارش تماس در شیت ناموفق بود', 'error'))

@@ -9400,8 +9400,12 @@ function tileEnd(offset, proposed, pageSize, blocks) {
   return end;
 }
 
-/* PDF به صورت تکه‌های مستقل ساخته می‌شود تا محدودیت اندازهٔ canvas
- * مرورگر باعث حذف انتهای پرونده‌های بلند نشود. */
+/* PDF یکپارچه و بدون صفحه‌بندی (تک‌صفحه پیوسته):
+ * کل کارنامه روی یک صفحه‌ی پیوسته با ارتفاع دقیق محتوا قرار می‌گیرد تا هیچ
+ * جدولی وسط صفحه دو نیم نشود. برای پایداری حافظه‌ی مرورگر در کارنامه‌های بلند،
+ * رندر DOM در نوارهای محدود (حداکثر ۶۰۰۰ پیکسل) انجام و بدون درز روی همان
+ * صفحه‌ی پیوسته چیده می‌شود. فقط در موارد بسیار استثنایی فراتر از سقف استاندارد
+ * PDF (۱۴۰۰۰ پوینت ≈ ۲۶۰۰۰ پیکسل)، برش در مرز ردیف/کارت انجام می‌شود. */
 async function downloadPdf(source, filename, prepare) {
   if (!source || !source.isConnected) throw new Error('پرونده‌ی آماده‌ای برای خروجی وجود ندارد');
   if (typeof window.html2canvas !== 'function') throw new Error('کتابخانه‌ی عکس بارگذاری نشده است');
@@ -9415,54 +9419,72 @@ async function downloadPdf(source, filename, prepare) {
     host.style.width = width + 'px';
     const height = Math.ceil(Math.max(host.scrollHeight, host.getBoundingClientRect().height));
     if (!width || !height) throw new Error('ابعاد محتوای PDF قابل محاسبه نیست');
-    const pdf = new lib({ unit: 'pt', format: 'a4', orientation: 'landscape', compress: true });
-    const pageWidth = pdf.internal.pageSize.getWidth(), pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 18, imageWidth = pageWidth - margin * 2;
-    const sliceHeight = Math.max(1, Math.floor(width * (pageHeight - margin * 2) / imageWidth));
-    const blocks = pageBreaks(host), pages = [];
-    let offset = 0;
-    while (offset < height) {
-      const proposed = Math.min(offset + sliceHeight, height);
-      const end = proposed < height ? tileEnd(offset, proposed, sliceHeight, blocks) : proposed;
-      pages.push({ y: offset, height: end - offset });
-      offset = end;
-    }
-    // Capture several pages at a time. Re-cloning the entire app for every
-    // page is extremely slow, but one canvas for an unlimited profile would
-    // exceed browser limits. Batch size and pixel area remain bounded.
-    const batchLimit = 6000;
-    for (let first = 0; first < pages.length;) {
-      let last = first + 1;
-      while (last < pages.length && pages[last].y + pages[last].height - pages[first].y <= batchLimit) last++;
-      const y = pages[first].y, batchHeight = pages[last - 1].y + pages[last - 1].height - y;
-      const scale = Math.min(1.2, 3000 / width, 6000 / batchHeight, Math.sqrt(12000000 / (width * batchHeight)));
-      const canvas = await window.html2canvas(host, {
-        backgroundColor: themeBackground(), scale, useCORS: true, logging: false,
-        width, height: batchHeight, x: 0, y,
-        windowWidth: window.innerWidth, windowHeight: window.innerHeight, scrollX: 0, scrollY: 0,
-        onclone: (doc, clonedHost) => {
-          if (clonedHost && clonedHost.parentNode === doc.body) {
-            [...doc.body.children].forEach(node => { if (node !== clonedHost && node.tagName !== 'STYLE') node.remove(); });
-          }
-        }
-      });
-      if (!canvas.width || !canvas.height) throw new Error('تصویر یکی از صفحه‌های PDF ساخته نشد');
-      for (let index = first; index < last; index++) {
-        const page = pages[index];
-        const from = Math.round((page.y - y) * canvas.height / batchHeight);
-        const to = Math.round((page.y + page.height - y) * canvas.height / batchHeight);
-        const slice = document.createElement('canvas');
-        slice.width = canvas.width; slice.height = Math.max(1, to - from);
-        const context = slice.getContext('2d');
-        if (!context) throw new Error('ساخت تصویر PDF ممکن نشد');
-        context.fillStyle = themeBackground(); context.fillRect(0, 0, slice.width, slice.height);
-        context.drawImage(canvas, 0, from, canvas.width, slice.height, 0, 0, slice.width, slice.height);
-        if (index) pdf.addPage();
-        pdf.addImage(slice.toDataURL('image/jpeg', 0.94), 'JPEG', margin, margin, imageWidth, page.height * imageWidth / width);
-        slice.width = slice.height = 0;
+
+    const bg = themeBackground();
+    const pageWidth = 842; // عرض استاندارد A4 افقی برای خوانایی کامل جدول‌ها
+    const margin = 18;
+    const imageWidth = pageWidth - margin * 2;
+    const ptPerPx = imageWidth / width;
+    const MAX_PDF_PAGE_PT = 14000; // سقف استاندارد PDF 1.7 (حداکثر ۱۴۴۰۰ پوینت)
+    const maxSlicePx = Math.max(1, Math.floor((MAX_PDF_PAGE_PT - margin * 2) / ptPerPx));
+
+    const pages = [];
+    if (height <= maxSlicePx) {
+      pages.push({ y: 0, height });
+    } else {
+      const blocks = pageBreaks(host);
+      let offset = 0;
+      while (offset < height) {
+        const proposed = Math.min(offset + maxSlicePx, height);
+        const end = proposed < height ? tileEnd(offset, proposed, maxSlicePx, blocks) : proposed;
+        pages.push({ y: offset, height: Math.max(1, end - offset) });
+        offset = end;
       }
-      canvas.width = canvas.height = 0;
-      first = last;
+    }
+
+    const orientFor = (w, h) => (w >= h ? 'landscape' : 'portrait');
+    const pageHeightOf = (slicePx) => Math.max(100, Math.ceil(slicePx * ptPerPx + margin * 2));
+    const paintBg = (doc, w, h) => {
+      if (typeof doc.setFillColor === 'function' && typeof doc.rect === 'function') {
+        try { doc.setFillColor(bg); doc.rect(0, 0, w, h, 'F'); } catch (e) {}
+      }
+    };
+
+    const firstH = pageHeightOf(pages[0].height);
+    const pdf = new lib({ unit: 'pt', format: [pageWidth, firstH], orientation: orientFor(pageWidth, firstH), compress: true });
+    paintBg(pdf, pageWidth, firstH);
+
+    // نوارهای رندر محدود تا سقف canvas مرورگر هیچ‌گاه سرریز نشود.
+    const stripLimit = 6000;
+    for (let pIndex = 0; pIndex < pages.length; pIndex++) {
+      const page = pages[pIndex];
+      const curPageH = pageHeightOf(page.height);
+      if (pIndex > 0) {
+        pdf.addPage([pageWidth, curPageH], orientFor(pageWidth, curPageH));
+        paintBg(pdf, pageWidth, curPageH);
+      }
+      let stripOffset = 0;
+      while (stripOffset < page.height) {
+        const stripH = Math.min(stripLimit, page.height - stripOffset);
+        const y = page.y + stripOffset;
+        const scale = Math.min(1.5, 3200 / width, 6000 / stripH, Math.sqrt(14000000 / (width * stripH)));
+        const canvas = await window.html2canvas(host, {
+          backgroundColor: bg, scale, useCORS: true, logging: false,
+          width, height: stripH, x: 0, y,
+          windowWidth: window.innerWidth, windowHeight: window.innerHeight, scrollX: 0, scrollY: 0,
+          onclone: (doc, clonedHost) => {
+            if (clonedHost && clonedHost.parentNode === doc.body) {
+              [...doc.body.children].forEach(node => { if (node !== clonedHost && node.tagName !== 'STYLE') node.remove(); });
+            }
+          }
+        });
+        if (!canvas.width || !canvas.height) throw new Error('تصویر فایل PDF ساخته نشد');
+        const pdfY = margin + stripOffset * ptPerPx;
+        const pdfH = stripH * ptPerPx;
+        pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', margin, pdfY, imageWidth, pdfH);
+        canvas.width = canvas.height = 0;
+        stripOffset += stripH;
+      }
     }
     pdf.save(fileName(filename, 'pdf'));
     return { pages: pages.length, width, height };
@@ -12506,18 +12528,18 @@ async function render(root, arg) {
     });
     // Use proportional widths instead of a hard minimum: all columns remain
     // within the profile viewport, including when a form has many criteria.
-    const weights = [3, 5, 3, 3, 2].concat(columns.map(() => 1), [3, 3, 7]);
+    const weights = [3, 5, 3, 2].concat(columns.map(() => 1), [3, 3, 7]);
     const totalWeight = weights.reduce((a, b) => a + b, 0);
     const multipleGroups = new Set(columns.map(c => c.form + '|' + c.team)).size > 1;
     return `<table class="tbl profile-call-table" id="pCallHistory">
       <colgroup>${weights.map(w => `<col style="width:${w * 100 / totalWeight}%">`).join('')}</colgroup>
       <thead>${columns.length ? `<tr><th class="profile-legend-head" colspan="${weights.length}"><div class="profile-criterion-legend">${columns.map((col, i) => `<span class="profile-legend-item"><b>${fa(i + 1)}</b> ${esc(col.label)}${multipleGroups ? ` <small>(${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</small>` : ''}</span>`).join('')}</div></th></tr>` : ''}
-      <tr><th>تاریخ بررسی</th><th>لید و شماره تماس</th><th>فرم</th><th>کارشناس QC</th><th>نمره</th>${columns.map((col, i) => `<th class="profile-criterion-head" title="${esc(col.label)} — ${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''}"><span aria-hidden="true">${fa(i + 1)}</span><span class="profile-visually-hidden"> ${esc(col.label)} (${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</span></th>`).join('')}<th>ردلاین</th><th>زمان تماس</th><th>کامنت QC</th></tr></thead>
+      <tr><th>تاریخ بررسی</th><th>لید و شماره تماس</th><th>فرم</th><th>نمره</th>${columns.map((col, i) => `<th class="profile-criterion-head" title="${esc(col.label)} — ${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''}"><span aria-hidden="true">${fa(i + 1)}</span><span class="profile-visually-hidden"> ${esc(col.label)} (${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</span></th>`).join('')}<th>ردلاین</th><th>زمان تماس</th><th>کامنت QC</th></tr></thead>
       <tbody>${historyCalls.map((row, index) => `<tr id="pCallDetails-${index}" class="profile-call-row">
           <td dir="ltr">${esc(fa(row.reviewDate || '—'))}</td>
           <td class="cell-main">${esc(row.leadName || '—')}<div class="cell-sub" dir="ltr">${esc(row.leadPhone || '—')}</div></td>
           <td>${esc(FORM_TYPE_FA[row.formType] || row.formType || '—')}</td>
-          <td>${esc(row.qcAgent || '—')}</td><td>${scorePill(row.score)}</td>
+          <td>${scorePill(row.score)}</td>
           ${columns.map(col => `<td class="profile-criterion-value">${matrix[index].has(col.identity) ? triValue(matrix[index].get(col.identity)) : '<span title="این المان برای این فرم نیست">·</span>'}</td>`).join('')}
           <td>${callRedlineBadge(row, index)}${row.redlineReason ? `<div class="profile-redline-reason">${esc(row.redlineReason)}</div>` : ''}</td>
           <td>${callTimeCell(row)}</td>
@@ -13011,8 +13033,8 @@ async function render(root, arg) {
   }
 
   /* ------------------------------ PDF ------------------------------
-   * PDF از همان تصویر کامل پرونده ساخته می‌شود تا متن فارسی درست بماند؛
-   * تصویر بلند به صفحه‌های A4 بریده می‌شود.
+   * PDF به‌صورت یکپارچه و بدون صفحه‌بندی (تک‌صفحه پیوسته) ساخته می‌شود تا هیچ
+   * جدولی وسط صفحه دو نیم نشود و متن فارسی دقیقاً مطابق تصویر بماند.
    */
   async function exportPdf() {
     if (!curData || !profileBody) return;
@@ -13023,7 +13045,7 @@ async function render(root, arg) {
       App.charts.forEach((chart) => { if (chart.update) chart.update('none'); });
       const name = `${curData.agent.name} — کارنامه ${curData.scope.from || 'ابتدا'} تا ${curData.scope.to || 'انتها'}`;
       const out = await QCCapture.downloadPdf(profileBody, name, revealAll);
-      toast.success(`فایل PDF آماده شد (${fa(out.pages)} صفحه)`);
+      toast.success(out.pages === 1 ? 'فایل PDF یکپارچه و بدون صفحه‌بندی آماده شد' : `فایل PDF آماده شد (${fa(out.pages)} صفحه)`);
     } catch (e) {
       toast.error(e.message);
     } finally {
@@ -14324,6 +14346,14 @@ const { $, esc } = UI;
 const STANDALONE = !!(window.APP_SCRIPT_MODE && window.APP_SCRIPT_URL);
 const SRC = STANDALONE ? window.APP_SCRIPT_URL + '#/callreport' : 'call-admin-report.html';
 
+async function loadSystemAgents() {
+  try {
+    const list = await UI.api.get('/api/agents');
+    if (Array.isArray(list)) return list;
+  } catch (e) {}
+  return (App.state && Array.isArray(App.state.agents)) ? App.state.agents : [];
+}
+
 function rangeSource() {
   if (STANDALONE) return SRC; // New tab enters the authenticated SPA, never a public report URL.
   const params = new URLSearchParams();
@@ -14356,12 +14386,30 @@ function render(root) {
     </div>`;
 
   const frame = $('#crFrame', root);
+  const targetOrigin = () => (location.origin === 'null' ? '*' : location.origin);
+  const postAgents = async (requestId) => {
+    if (!frame.isConnected || !frame.contentWindow) return;
+    const agents = await loadSystemAgents();
+    if (!frame.isConnected || !frame.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage({ type: 'crmqc:system-agents', agents, requestId: requestId || null }, targetOrigin());
+    } catch (e) {}
+  };
   const syncRange = () => {
     if (!frame.isConnected || !frame.contentWindow) return;
     $('#crNewTab', root).href = rangeSource();
-    frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: App.theme }, location.origin === 'null' ? '*' : location.origin);
-    frame.contentWindow.postMessage({ type: 'crmqc:date-range', range: App.dateRange }, location.origin === 'null' ? '*' : location.origin);
+    frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: App.theme }, targetOrigin());
+    frame.contentWindow.postMessage({ type: 'crmqc:date-range', range: App.dateRange }, targetOrigin());
+    postAgents();
   };
+  const onMsg = (event) => {
+    if (!root.isConnected) { window.removeEventListener('message', onMsg); return; }
+    const data = event.data || {};
+    if (data.type === 'qc:request-system-agents' && frame && event.source === frame.contentWindow) {
+      postAgents(data.requestId);
+    }
+  };
+  window.addEventListener('message', onMsg);
   frame.addEventListener('load', syncRange);
   App.onDateRangeChange(syncRange);
   $('#crReload').addEventListener('click', () => { frame.src = rangeSource(); });
@@ -14449,7 +14497,9 @@ function renderStandalone(root) {
     const target = reportTarget && reportTarget.isConnected ? reportTarget : wrap;
     if (!target || !target.isConnected) return;
     const doc = String(html || '');
-    const withParams = `<script>window.__QC_CALL_REPORT_PARAMS__ = ${JSON.stringify('?' + params.toString())};<\/script>`;
+    const initialAgents = (App.state && Array.isArray(App.state.agents)) ? App.state.agents : [];
+    const safeJson = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
+    const withParams = `<script>window.__QC_CALL_REPORT_PARAMS__ = ${safeJson('?' + params.toString())};window.__QC_SYSTEM_AGENTS__ = ${safeJson(initialAgents)};<\/script>`;
     const full = doc.indexOf('<head>') >= 0
       ? doc.replace('<head>', '<head>' + bridgeScript() + withParams)
       : bridgeScript() + withParams + doc;
@@ -14462,6 +14512,9 @@ function renderStandalone(root) {
       try {
         frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: App.theme }, '*');
         frame.contentWindow.postMessage({ type: 'crmqc:date-range', range: App.dateRange }, '*');
+        loadSystemAgents().then((agents) => {
+          try { if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type: 'crmqc:system-agents', agents }, '*'); } catch (e) {}
+        });
       } catch (e) { /* بی‌اثر */ }
     });
     target.innerHTML = '';
@@ -14504,12 +14557,23 @@ function renderStandalone(root) {
       .getCallReportHtml(token);
   }
 
-  /* ذخیره‌ی تنظیمات ابزار (کارشناسان/دسترسی‌ها) از داخل iframe به شیت */
+  /* ذخیره‌ی تنظیمات ابزار (کارشناسان/دسترسی‌ها) و ارسال فهرست کارشناسان سیستم به iframe */
   const onMessage = (event) => {
     /* صفحه که عوض شود، گوش‌دهنده خودش بازنشسته می‌شود */
     if (!root.isConnected) { window.removeEventListener('message', onMessage); return; }
     const data = event.data || {};
-    if (data.type !== 'qc:callreport-save' || !frame || event.source !== frame.contentWindow) return;
+    if (!frame || event.source !== frame.contentWindow) return;
+    if (data.type === 'qc:request-system-agents') {
+      loadSystemAgents().then((agents) => {
+        try {
+          if (frame && frame.contentWindow) {
+            frame.contentWindow.postMessage({ type: 'crmqc:system-agents', agents, requestId: data.requestId || null }, '*');
+          }
+        } catch (e) {}
+      });
+      return;
+    }
+    if (data.type !== 'qc:callreport-save') return;
     if (!(window.google && google.script && google.script.run)) return;
     google.script.run
       .withFailureHandler(() => UI.toast('ذخیره تنظیمات گزارش تماس در شیت ناموفق بود', 'error'))

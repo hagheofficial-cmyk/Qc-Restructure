@@ -850,6 +850,83 @@ test('65-specialist Metabase parity (incl. سحر سامنی) and Specialist Pro
   assert.equal(w.document.querySelector('#pDateCoverageAlert'), null, 'Alert must disappear once full specialist range is active');
   assert.equal(w.document.querySelector('#pTopKpis [data-kpi="fixed"] strong').textContent.trim(), '۸۲.۷۵');
   assert.equal(w.document.querySelector('#pTopKpis [data-kpi="situational"] strong').textContent.trim(), '۷۲.۴۳');
+  const callHistHeaders = [...w.document.querySelectorAll('#pCallHistory thead tr:last-child th')].map(th => th.textContent.trim());
+  assert.equal(callHistHeaders.includes('کارشناس QC'), false, 'کارشناس QC column must not appear in call history table');
   assert.equal(env.errors.length, 0);
 });
+
+/* =========================================================================
+ * 11. Call Report: one-click import of registered system agents + Step 2
+ *     transition, and single-page continuous PDF verification with real jsPDF
+ * ========================================================================= */
+test('Call Report imports all registered system specialists on click and proceeds to Step 2', async (t) => {
+  const { JSDOM } = require('jsdom');
+  const html = fs.readFileSync(path.join(ROOT, 'public/call-admin-report.html'), 'utf8');
+  const calcJs = fs.readFileSync(path.join(ROOT, 'public/calc.js'), 'utf8');
+  const rangeJs = fs.readFileSync(path.join(ROOT, 'public/callReportRange.js'), 'utf8');
+  const seedAgents = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/seed.json'), 'utf8')).agents;
+
+  // Verify the button UI exists in both Step 1 header box, table toolbar, and Excel upload tab
+  assert.ok(html.includes('id="btnUseSystemAgents"'));
+  assert.ok(html.includes('id="btnUseSystemAgentsExcel"'));
+  assert.ok(html.includes('id="btnImportSystemToTable"'));
+  assert.ok(html.includes('استفاده از کارشناسان ثبت‌شده روی سیستم'));
+
+  // Run callReportRange.js + useSystemRegisteredExperts inside a JSDOM sandbox connected to a mock parent
+  const dom = new JSDOM(`<!doctype html><html><body>
+    <div id="step1Panel">
+      <div id="tab-table" class="tab-content active">
+        <table><tbody id="expertEditTbody"></tbody></table>
+        <span id="expertCountStatus"></span>
+      </div>
+      <div id="step1Status"></div>
+    </div>
+    <div id="step2Panel" style="display:none"><div id="step2SystemBanner" style="display:none"></div></div>
+    <button id="btnUseSystemAgents"></button>
+  </body></html>`, { url: 'http://localhost:8000/call-admin-report.html', runScripts: 'outside-only' });
+  t.after(() => dom.window.close());
+  const win = dom.window;
+  win.allRawCallLogs = [];
+  win.allResults = [];
+  win.expertsList = [];
+  win.currentTeamAccessProfile = null;
+  win.normalizeStr = (s) => String(s || '').trim().toLowerCase();
+  win.switchTab = () => {};
+  win.renderExpertEditTable = () => {
+    win.document.getElementById('expertCountStatus').textContent = 'تعداد کارشناسان: ' + win.expertsList.length;
+  };
+  win.saveExpertsToStorage = () => {
+    win.localStorage.setItem('bimeh_bazar_experts_v2', JSON.stringify(win.expertsList));
+  };
+  win.showStep1Status = (msg) => { win.document.getElementById('step1Status').textContent = msg; };
+  win.saveExpertsAndProceed = () => {
+    win.document.getElementById('step1Panel').style.display = 'none';
+    win.document.getElementById('step2Panel').style.display = 'block';
+  };
+  win.fetch = async (url) => {
+    assert.equal(url, '/api/agents');
+    return { ok: true, json: async () => seedAgents };
+  };
+
+  win.eval(calcJs);
+  win.eval(rangeJs);
+
+  // Extract useSystemRegisteredExperts directly from call-admin-report.html and execute it in the sandbox
+  const fnMatch = html.match(/async function useSystemRegisteredExperts\(proceedToStep2\)[\s\S]*?^\s{8}\}/m);
+  assert.ok(fnMatch, 'useSystemRegisteredExperts must exist in call-admin-report.html');
+  win.eval(fnMatch[0]);
+
+  await win.useSystemRegisteredExperts(true);
+  assert.equal(win.expertsList.length, seedAgents.length, 'All 65 registered system specialists must be imported');
+  assert.equal(win.expertsList[0].id, String(seedAgents[0].ext));
+  assert.equal(win.expertsList[0].name, seedAgents[0].name);
+  assert.equal(win.expertsList[0].team, seedAgents[0].team);
+  assert.equal(win.document.getElementById('step1Panel').style.display, 'none', 'Step 1 hides after system import');
+  assert.equal(win.document.getElementById('step2Panel').style.display, 'block', 'Step 2 (call report upload) opens immediately');
+  assert.equal(win.document.getElementById('step2SystemBanner').style.display, 'block');
+  assert.ok(win.document.getElementById('step2SystemBanner').textContent.includes(String(seedAgents.length)));
+  const persisted = JSON.parse(win.localStorage.getItem('bimeh_bazar_experts_v2'));
+  assert.equal(persisted.length, seedAgents.length, 'Imported specialists are saved to storage');
+});
+
 
