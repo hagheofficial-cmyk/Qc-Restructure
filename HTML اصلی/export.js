@@ -144,9 +144,13 @@ window.QCExport = {
       const subset = (calls || []).filter((r) => r.formType === form);
       if (!subset.length) continue;
       const keys = QCReports.criteriaKeys(subset, form, QCParse);
-      const header = ['نام کارشناس', 'نمره کلی تماس', 'نام شریک', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین ها', 'توضیحات ردلاین'];
-      const data = subset.map((r) => [r.expertName, C.normalizeScore(r.score), r.leadName,
-        ...keys.map((key) => C.normalizeTri((r.elements || {})[key])), QCReports.hasRedline(r, 'call') ? 1 : '-', r.redlineReason || '']);
+      const header = ['نام کارشناس', 'نمره کلی تماس', 'نام شریک', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین ها', 'توضیحات ردلاین', 'کامنت QC'];
+      const data = subset.map((r) => {
+        const isRl = QCReports.hasRedline(r, 'call');
+        const d = QCReports.redlineDetails(r);
+        return [r.expertName, C.normalizeScore(r.score), r.leadName,
+          ...keys.map((key) => C.normalizeTri((r.elements || {})[key])), isRl ? 1 : '-', isRl ? d.text : (d.reason || ''), r.qcComment || ''];
+      });
       XLSX.utils.book_append_sheet(wb, mk([header, ...data]), 'جزئیات ' + ({ tele: 'Telesales', account: 'اکانت', mlm: 'MLM' }[form]));
     }
     download(wb, `QC_Call_Report_${stamp()}.xlsx`);

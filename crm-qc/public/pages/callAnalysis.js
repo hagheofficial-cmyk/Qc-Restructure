@@ -230,7 +230,7 @@ async function render(root) {
               <div style="flex:1;font-size:12px">
                 <b class="agent-row" data-agent="${esc(r.expertName)}" style="cursor:pointer;color:var(--brand)">${esc(r.expertName)}</b>
                 <span style="color:var(--muted)"> · ${esc(FORM_FA[r.formType] || r.formType || '—')} · نمره ${r.score != null ? esc(fa(r.score)) : '—'}</span>
-                <div style="color:var(--bad);margin-top:4px">${esc(r.reason || '(علت ثبت نشده)')}</div>
+                <div style="margin-top:4px;white-space:pre-wrap">${UI.redlineDetailHtml(r)}</div>
                 <div style="font-size:10px;color:var(--muted);margin-top:4px">لید: ${esc(r.leadName || '—')}${r.leadPhone ? ' (' + esc(r.leadPhone) + ')' : ''} · ${esc(r.date || '—')}</div>
               </div>
             </div>`).join('')}</div>
@@ -326,8 +326,11 @@ async function render(root) {
         ]});
       }
       sheets.push({ name: 'ردلاین‌ها', rows: [
-        ['کارشناس', 'تیم', 'نمره', 'علت', 'لید', 'تلفن لید', 'تاریخ', 'فایل'],
-        ...(an.redlines || []).map((r) => [r.expertName, r.formType, r.score, r.reason, r.leadName, r.leadPhone, r.date, r.sourceFile || ''])
+        ['کارشناس', 'تیم', 'نمره', 'علت ردلاین', 'کامنت QC', 'لید', 'تلفن لید', 'تاریخ', 'فایل'],
+        ...(an.redlines || []).map((r) => {
+          const d = QCReports.redlineDetails(r);
+          return [r.expertName, r.formType, r.score, d.reason || d.comment, r.qcComment || '', r.leadName, r.leadPhone, r.date, r.sourceFile || ''];
+        })
       ]});
       sheets.push({ name: 'کامنت‌های QC', rows: [
         ['کارشناس', 'تیم', 'نمره', 'کامنت', 'المان‌های نقطه‌ضعف', 'لید', 'تلفن لید', 'تاریخ'],

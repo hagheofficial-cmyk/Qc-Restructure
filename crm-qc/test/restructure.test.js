@@ -16,7 +16,7 @@ const E = require('../shared/expertRef');
 const F = require('../shared/fiscal');
 const Sheets = require('../googleSheets');
 const Watcher = require('../callWatcher');
-const { ROOT, browser, clone, settle, go } = require('./helpers');
+const { ROOT, browser, clone, fixture, settle, go } = require('./helpers');
 
 const SAMPLES_DIR = path.resolve(ROOT, '..', 'نمونه اکسل ها');
 function findSample(prefix) {
@@ -1029,6 +1029,217 @@ test('Full backup v4 restores all datasets incl. fiscalMonths/lists/qcUsers/elem
   assert.equal(w.document.documentElement.dataset.theme, 'light');
   assert.equal(errors.length, 0);
 });
+
+test('Hamburger menu Call Report navigation works cleanly (incl. <base target="_top">, aliases, and GAS initial route)', async (t) => {
+  const data = fixture();
+  const env = browser('public', data);
+  const { w, dom, errors } = env;
+  t.after(() => dom.window.close());
+
+  // Simulate Google Apps Script HtmlService injecting <base target="_top">
+  const baseEl = w.document.createElement('base');
+  baseEl.setAttribute('target', '_top');
+  w.document.head.appendChild(baseEl);
+
+  await w.App.boot();
+  w.App.bindDateRangeUI();
+  w.App.bindChrome();
+  w.location.hash = '#/dashboard';
+  await w.App.route();
+  await settle();
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'داشبورد — نمای کلی');
+
+  // Open hamburger menu and click «گزارش تماس»
+  w.document.getElementById('hamburger').click();
+  assert.ok(w.document.getElementById('sidebar').classList.contains('open'));
+  const callLink = w.document.querySelector('#nav a[data-route="callreport"]');
+  assert.ok(callLink, 'Call Report nav item must exist in #nav');
+  const clickEv = new w.MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+  const notPrevented = callLink.dispatchEvent(clickEv);
+  await settle(); await settle();
+  assert.equal(notPrevented, false, 'Delegated click handler must cancel default browser navigation');
+  assert.equal(clickEv.defaultPrevented, true, 'Delegated click handler must preventDefault() so <base target="_top"> cannot reload into Dashboard');
+  assert.equal(w.location.hash, '#/callreport');
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'گزارش تماس');
+  assert.ok(w.document.getElementById('crFrame'), 'Call Report iframe must render');
+  assert.equal(w.document.getElementById('sidebar').classList.contains('open'), false, 'Sidebar closes after navigation');
+
+  // Route aliases (#/call-report and #/callreport?qcTheme=light) must also resolve to callreport, never Dashboard
+  w.location.hash = '#/call-report';
+  await w.App.route(); await settle();
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'گزارش تماس');
+  w.location.hash = '#/callreport?qcTheme=light';
+  await w.App.route(); await settle();
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'گزارش تماس');
+
+  // Standalone GAS mode with empty APP_SCRIPT_URL still invokes renderStandalone (not broken call-admin-report.html)
+  w.APP_SCRIPT_MODE = true;
+  w.APP_SCRIPT_URL = '';
+  w.QCAuth = { required: true, token: 't1', user: { name: 'مدیر', role: 'admin' }, can: () => true };
+  let gasCalls = 0;
+  w.google = { script: { run: (() => {
+    const api = { _ok: null, _fail: null,
+      withSuccessHandler(fn) { api._ok = fn; return api; },
+      withFailureHandler(fn) { api._fail = fn; return api; },
+      getCallReportHtml() { gasCalls++; setTimeout(() => api._ok && api._ok('<html><head><title>CR</title></head><body>OK</body></html>'), 0); return api; }
+    };
+    return api;
+  })() } };
+  await w.App.route(); await settle(); await settle();
+  assert.equal(gasCalls, 1, 'Standalone GAS mode with empty APP_SCRIPT_URL still loads via getCallReportHtml');
+  assert.ok(w.document.querySelector('#content iframe[srcdoc]') || (w.document.querySelector('#content iframe') && w.document.querySelector('#content iframe').srcdoc.includes('OK')));
+  delete w.APP_SCRIPT_MODE; delete w.APP_SCRIPT_URL; delete w.google; delete w.QCAuth;
+
+  // GAS doGet passes ?route=callreport and ?page=call-report into __QC_INITIAL_ROUTE__ without exposing CallReport directly
+  const codeGs = fs.readFileSync(path.join(ROOT, 'apps-script-full/Code.gs'), 'utf8');
+  const ctx = {
+    console,
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => 'sheet-1' }) },
+    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/test/exec' }) },
+    HtmlService: {
+      createHtmlOutput: v => ({ content: v, setTitle() { return this; }, addMetaTag() { return this; }, setFaviconUrl() { return this; } }),
+      createHtmlOutputFromFile: n => ({ getContent: () => `<html><head><script>window.APP_SCRIPT_URL="__QC_APP_SCRIPT_URL__";window.APP_SCRIPT_INITIAL_ROUTE="__QC_INITIAL_ROUTE_VALUE__";</script></head><body>${n}</body></html>` })
+    }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(codeGs, ctx, { filename: 'Code.gs', timeout: 10000 });
+  const r1 = ctx.doGet({ parameter: { route: 'callreport' } });
+  assert.ok(r1.content.includes('Index') && r1.content.includes('window.APP_SCRIPT_INITIAL_ROUTE="callreport"'));
+  const r2 = ctx.doGet({ parameter: { page: 'call-report' } });
+  assert.ok(r2.content.includes('Index') && r2.content.includes('window.APP_SCRIPT_INITIAL_ROUTE="callreport"'));
+  const rEmpty = ctx.doGet({ parameter: {} });
+  assert.ok(rEmpty.content.includes('window.APP_SCRIPT_INITIAL_ROUTE=""'));
+
+  // Built CallReport.html has a single favicon and guards .crmqc-back inside iframe
+  const crHtml = fs.readFileSync(path.join(ROOT, 'apps-script-full/CallReport.html'), 'utf8');
+  const iconMatches = crHtml.match(/<link rel="icon"/g) || [];
+  assert.equal(iconMatches.length, 1, 'CallReport.html must have exactly one favicon link');
+  assert.ok(crHtml.includes('if (window.parent && window.parent !== window) return;'), 'CallReport.html skips back bar when embedded in srcdoc iframe');
+  assert.equal(errors.length, 0);
+});
+
+test('Redline reasons (all redline reason column variants) and QC comments are parsed and rendered everywhere without false empty notices', async (t) => {
+  // (A) Parser detects all redline reason header variants + QC Comment and ignores null/- placeholders
+  const parsed = P.parseRows([
+    {
+      account_expert_name: 'کارشناس الف', score: 0, redline: 1,
+      'redline reason': 'ارائه اطلاعات اشتباه درباره کارمزد',
+      'QC Comment': 'کارشناس نرخ قدیمی اعلام کرده است',
+      form_created_date: '1405/06/20', lead_name: 'شریک اول'
+    },
+    {
+      account_expert_name: 'کارشناس ب', score: 0, RED_LINE: '"1"', redline: '"1"',
+      'Red_line_Reason': '"عدم رعایت احترام"',
+      'QC comment': '"لحن نامناسب در مکالمه"',
+      form_created_date: '1405/06/20', lead_name: 'شریک دوم'
+    },
+    {
+      tele_expert_name: 'کارشناس الف', score: 0, redline: '1',
+      'RED LINE REASON': 'null',
+      'QC Comment': 'پس از قطع تماس مجدد تماس گرفته نشد',
+      form_created_date: '1405/06/20', lead_name: 'شریک سوم'
+    },
+    {
+      tele_expert_name: 'کارشناس ب', score: 0, redline: '1',
+      'redline_reason_1': 'تخلف در اعلام جشنواره',
+      'QC Comment': '-',
+      form_created_date: '1405/06/20', lead_name: 'شریک چهارم'
+    }
+  ], 'account');
+  assert.equal(parsed[0].redlineReason, 'ارائه اطلاعات اشتباه درباره کارمزد');
+  assert.equal(parsed[0].qcComment, 'کارشناس نرخ قدیمی اعلام کرده است');
+  assert.equal(parsed[1].redlineReason, 'عدم رعایت احترام');
+  assert.equal(parsed[1].qcComment, 'لحن نامناسب در مکالمه');
+  assert.equal(parsed[2].redlineReason, '', 'Placeholder null must not be treated as a real reason');
+  assert.equal(parsed[2].qcComment, 'پس از قطع تماس مجدد تماس گرفته نشد');
+  assert.equal(parsed[3].redlineReason, 'تخلف در اعلام جشنواره');
+  assert.equal(parsed[3].qcComment, '', 'Placeholder - must not be treated as a real comment');
+
+  // (B) Real legacy Excel (qc_acc_form) with Red_line_Reason + QC comment AND new Metabase Excels with QC Comment
+  const repoRoot = path.resolve(ROOT, '..');
+  const legacyAcc = path.join(repoRoot, 'qc_acc_form_2026-10-14T19_30_41.611923442+03_30.xlsx');
+  if (fs.existsSync(legacyAcc)) {
+    const wb = XLSX.readFile(legacyAcc);
+    const rows = P.parseRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }), 'account');
+    const rls = rows.filter(r => R.hasRedline(r, 'call'));
+    assert.ok(rls.length >= 1);
+    assert.ok(rls[0].redlineReason.includes('ارائه اطلاعات اشتباه'), 'Legacy Red_line_Reason parsed');
+    assert.ok(rls[0].qcComment.includes('ردلاین'), 'Legacy QC comment parsed');
+  }
+  const newAcc = path.join(SAMPLES_DIR, findSample('qc_acc_new_form_'));
+  if (fs.existsSync(newAcc)) {
+    const wb = XLSX.readFile(newAcc);
+    const rows = P.parseRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }), 'account');
+    const rls = rows.filter(r => R.hasRedline(r, 'call'));
+    assert.equal(rls.length, 3);
+    assert.ok(rls.every(r => R.redlineDetails(r).hasAny), 'All 3 new Account redlines have detail text via QC Comment');
+  }
+
+  // (C) UI rendering across Reports modal, Call detail modal, Portfolio, and Call Analysis
+  const data = fixture();
+  data.callFeedbacks = [
+    {
+      expertName: 'کارشناس الف', team: 'Tele Sales', formType: 'tele', reviewDate: '1405/06/20',
+      leadName: 'شریک با علت و کامنت', leadPhone: '09120001111', score: 0, redline: 1,
+      redlineReason: 'ارائه اطلاعات غلط <script>alert(1)</script>',
+      qcComment: 'جزئیات کامنت مدیر QC',
+      listeningTime: '60', elements: { Call_opening_quality: 0 }
+    },
+    {
+      expertName: 'کارشناس الف', team: 'Tele Sales', formType: 'tele', reviewDate: '1405/06/20',
+      leadName: 'شریک فقط با کامنت', leadPhone: '09120002222', score: 0, redline: 1,
+      redlineReason: '',
+      qcComment: 'پس از قطع تماس با شریک مجدد تماس گرفته نشد',
+      listeningTime: '45', elements: { Call_opening_quality: 1 }
+    }
+  ];
+  const { w, dom, errors } = browser('public', data);
+  t.after(() => dom.window.close());
+  await w.App.boot();
+  await w.App.setDateRange({ from: '1405/06/20', to: '1405/06/20' });
+
+  // 1) Reports -> Call tab -> Redlines group modal
+  await go(w, 'reports'); await settle();
+  w.document.querySelector('#typeTabs [data-t="call"]').click(); await settle(); await settle();
+  const groupBtn = w.document.querySelector('#tblWrap [data-call-group]');
+  assert.ok(groupBtn, 'Redlines count badge button must exist');
+  groupBtn.click();
+  const modalBody = w.document.querySelector('.modal-body');
+  assert.ok(modalBody.textContent.includes('ارائه اطلاعات غلط'), 'Modal shows redlineReason');
+  assert.ok(modalBody.textContent.includes('جزئیات کامنت مدیر QC'), 'Modal shows qcComment alongside reason');
+  assert.ok(modalBody.textContent.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'), 'Modal shows qcComment when reason column absent');
+  assert.equal(modalBody.textContent.includes('علت ردلاین در فرم ثبت نشده است'), false, 'Must NOT show false empty notice when comment exists');
+  assert.equal(modalBody.querySelector('script'), null, 'XSS escaped');
+  w.document.querySelector('.modal-back:last-child .modal-head .x').click();
+
+  // 2) Portfolio -> Redlines card + call history Redlines column
+  await go(w, 'portfolio/' + encodeURIComponent('کارشناس الف')); await settle(); await settle();
+  const pBody = w.document.querySelector('.profile-modal') || w.document.getElementById('content');
+  assert.ok(pBody.textContent.includes('ارائه اطلاعات غلط'));
+  assert.ok(pBody.textContent.includes('جزئیات کامنت مدیر QC'));
+  assert.ok(pBody.textContent.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'));
+  assert.equal(pBody.textContent.includes('(ثبت نشده)'), false, 'Portfolio must NOT show (ثبت نشده) when QC comment exists');
+  // Click single-call redline badge on the comment-only row
+  const badges = [...w.document.querySelectorAll('#pCallHistory [data-call-redline]')];
+  assert.equal(badges.length, 2);
+  badges[1].click();
+  const singleModal = w.document.querySelector('.modal-back:last-child .modal-body');
+  assert.ok(singleModal.textContent.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'));
+  assert.equal(singleModal.textContent.includes('علت ردلاین در فرم ثبت نشده است'), false);
+  w.document.querySelector('.modal-back:last-child .modal-head .x').click();
+  const closeProf = w.document.querySelector('.profile-modal .x');
+  if (closeProf) closeProf.click();
+
+  // 3) Call Analysis -> Redlines section
+  await go(w, 'call-analysis'); await settle(); await settle();
+  const caText = w.document.getElementById('content').textContent;
+  assert.ok(caText.includes('ارائه اطلاعات غلط'));
+  assert.ok(caText.includes('جزئیات کامنت مدیر QC'));
+  assert.ok(caText.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'));
+  assert.equal(caText.includes('(علت ثبت نشده)'), false, 'Call Analysis must NOT show (علت ثبت نشده) when QC comment exists');
+  assert.equal(errors.length, 0);
+});
+
 
 
 

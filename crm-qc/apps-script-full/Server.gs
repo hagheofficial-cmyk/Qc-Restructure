@@ -243,10 +243,12 @@ function doGet(e) {
   // parsed as an Apps Script scriptlet.
   var page = e && e.parameter && e.parameter.page;
   // Never deliver report settings on an unauthenticated URL.
-
+  var initialRoute = String((e && e.parameter && e.parameter.route) || '').replace(/[^a-z0-9/_-]/gi, '');
+  if (!initialRoute && (page === 'call-report' || page === 'callreport')) initialRoute = 'callreport';
 
   var indexHtml = HtmlService.createHtmlOutputFromFile('Index').getContent()
-    .split('__QC_APP_SCRIPT_URL__').join(ScriptApp.getService().getUrl());
+    .split('__QC_APP_SCRIPT_URL__').join(ScriptApp.getService().getUrl() || '')
+    .split('__QC_INITIAL_ROUTE_VALUE__').join(initialRoute);
   return withFavicon_(HtmlService.createHtmlOutput(indexHtml)
     .setTitle('سامانه یکپارچه کنترل کیفیت CRM')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1'));

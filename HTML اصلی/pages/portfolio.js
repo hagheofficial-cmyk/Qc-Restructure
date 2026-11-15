@@ -300,7 +300,7 @@ async function render(root, arg) {
           <td>${esc(FORM_TYPE_FA[row.formType] || row.formType || '—')}</td>
           <td>${scorePill(row.score)}</td>
           ${columns.map(col => `<td class="profile-criterion-value">${matrix[index].has(col.identity) ? triValue(matrix[index].get(col.identity)) : '<span title="این المان برای این فرم نیست">·</span>'}</td>`).join('')}
-          <td>${callRedlineBadge(row, index)}${row.redlineReason ? `<div class="profile-redline-reason">${esc(row.redlineReason)}</div>` : ''}</td>
+          <td>${callRedlineBadge(row, index)}${QCReports.hasRedline(row, 'call') ? UI.redlineInlineHtml(row) : ''}</td>
           <td>${callTimeCell(row)}</td>
           <td class="profile-call-comment">${esc(row.qcComment || '—')}</td>
         </tr>`).join('')}</tbody></table>`;
@@ -529,13 +529,13 @@ async function render(root, arg) {
         <div class="head-icon" style="background:var(--bad-soft);color:var(--bad)"><i class="fa-solid fa-ban"></i></div>
         <div><h3>ردلاین‌ها (${fa(redlineRows.length)} مورد)</h3><div class="sub">علت و جزئیات هر ردلاین — کلیک روی لید = جستجو</div></div></div>
       <div class="table-wrap">
-        <table class="tbl"><thead><tr><th>تاریخ</th><th>لید</th><th>نوع</th><th>نمره</th><th>علت ردلاین</th></tr></thead>
+        <table class="tbl"><thead><tr><th>تاریخ</th><th>لید</th><th>نوع</th><th>نمره</th><th>علت ردلاین و کامنت QC</th></tr></thead>
         <tbody>${redlineRows.map((r) => `<tr>
           <td dir="ltr">${fa(r.date || '—')}</td>
           <td>${esc(r.leadName || '—')}<div style="font-size:10px;color:var(--muted)" dir="ltr">${esc(r.leadPhone || '')}</div></td>
           <td><span class="tag-team">${FORM_TYPE_FA[r.formType] || r.formType}</span></td>
           <td>${r.score != null ? scorePill(r.score) : '—'}</td>
-          <td style="font-size:12px;color:var(--bad);max-width:300px">${esc(r.reason || '(ثبت نشده)')}${r.qcComment ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">"${esc(r.qcComment)}"</div>` : ''}</td>
+          <td style="font-size:12px;max-width:340px;white-space:pre-wrap">${UI.redlineDetailHtml(r)}</td>
         </tr>`).join('')}</tbody></table></div></div>`;
   }
 
@@ -775,9 +775,12 @@ async function render(root, arg) {
       const calls = curData.calls.rows.filter((r) => r.formType === form);
       const keys = QCReports.criteriaKeys(calls, form, QCParse);
       return { name: FORM_TYPE_FA[form], rows: [
-        ['لید', 'شماره تماس', 'نمره', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین', 'علت ردلاین', 'تایم مکالمه', 'زمان شنود', 'تاریخ بررسی'],
-        ...calls.map((r) => [r.leadName, r.leadPhone, C.normalizeScore(r.score), ...keys.map((key) => C.normalizeTri((r.elements || {})[key])),
-          QCReports.hasRedline(r, 'call') ? 1 : '-', r.redlineReason || '', r.callDuration || '', r.listeningTime || '', r.reviewDate])
+        ['لید', 'شماره تماس', 'نمره', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین', 'علت ردلاین', 'کامنت QC', 'تایم مکالمه', 'زمان شنود', 'تاریخ بررسی'],
+        ...calls.map((r) => {
+          const d = QCReports.redlineDetails(r);
+          return [r.leadName, r.leadPhone, C.normalizeScore(r.score), ...keys.map((key) => C.normalizeTri((r.elements || {})[key])),
+            QCReports.hasRedline(r, 'call') ? 1 : '-', QCReports.hasRedline(r, 'call') ? d.text : (d.reason || ''), r.qcComment || '', r.callDuration || '', r.listeningTime || '', r.reviewDate];
+        })
       ] };
     }).filter((sheet) => sheet.rows.length > 1);
     const sitSheets = (curData.situational && curData.situational.hasData) ? [{

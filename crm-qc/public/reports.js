@@ -308,6 +308,30 @@
     // در فرم تیکت ۰ ردلاین است؛ در تماس (و سوشال دارای پرچم صریح) ۱.
     return C.normalizeTri(row.redline) === (type === 'ticket' ? 0 : 1);
   }
+  function cleanRedlineText(v) {
+    if (v === undefined || v === null) return '';
+    var s = String(v).trim();
+    while (s.length >= 2 && ((s[0] === '"' && s[s.length - 1] === '"') || (s[0] === "'" && s[s.length - 1] === "'"))) {
+      s = s.slice(1, -1).trim();
+    }
+    if (!s || /^(-|—|–|null|none|n\/a|nan)$/i.test(s)) return '';
+    return s;
+  }
+  function redlineDetails(row) {
+    var r = row || {};
+    var reason = cleanRedlineText(r.redlineReason != null ? r.redlineReason : r.reason);
+    var comment = cleanRedlineText(r.qcComment != null ? r.qcComment : r.comment);
+    var same = !!(reason && comment && reason === comment);
+    var parts = [];
+    if (reason) parts.push(reason);
+    if (comment && !same) parts.push(comment);
+    return {
+      reason: reason,
+      comment: same ? '' : comment,
+      text: parts.join(' — '),
+      hasAny: parts.length > 0
+    };
+  }
   function redlineCount(rows, type) { return (rows || []).filter(function (r) { return hasRedline(r, type); }).length; }
 
   function criteriaKeys(rows, type, crit) {
@@ -723,10 +747,11 @@
       return { form: ft, count: rs.length, rates: list, weak: weak.length };
     }).filter(Boolean);
 
-    /* ردلاین‌های کارشناس با علت */
+    /* ردلاین‌های کارشناس با علت و کامنت */
     var redlineRows = Ph.filter(function (r) { return hasRedline(r, 'call'); }).map(function (r) {
-      return { score: r.score, reason: r.redlineReason || '', date: r.reviewDate,
-               formType: r.formType, leadName: r.leadName, leadPhone: r.leadPhone, qcComment: r.qcComment || '' };
+      var d = redlineDetails(r);
+      return { score: r.score, reason: d.reason, redlineReason: d.reason, qcComment: cleanRedlineText(r.qcComment), detailText: d.text, date: r.reviewDate,
+               formType: r.formType, leadName: r.leadName, leadPhone: r.leadPhone };
     }).sort(function (x, y) { return (y.date || '').localeCompare(x.date || ''); });
 
     return {
@@ -924,8 +949,10 @@
 
     /* ردلاین‌ها */
     var redlines = Ph.filter(function (r) { return hasRedline(r, 'call'); }).map(function (r) {
+      var d = redlineDetails(r);
       return { expertName: r.expertName, leadName: r.leadName, leadPhone: r.leadPhone, formType: r.formType,
-        score: r.score, reason: r.redlineReason || '', date: r.reviewDate, sourceFile: r.sourceFile };
+        score: r.score, reason: d.reason, redlineReason: d.reason, qcComment: cleanRedlineText(r.qcComment), detailText: d.text,
+        date: r.reviewDate, sourceFile: r.sourceFile };
     }).sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
 
     /* Keep each weakness tied to the same evaluation as its QC comment. A
@@ -1064,7 +1091,7 @@
     effectiveChannelScore: effectiveChannelScore, computeWeightedScore: computeWeightedScore,
     situationalAvgOf: situationalAvgOf, aggregateSituational: aggregateSituational,
     scoredRows: scoredRows,
-    avgScore: avgScore, hasRedline: hasRedline, criteriaKeys: criteriaKeys, criterionStats: criterionStats, dataStatus: dataStatus, portfolioAgents: portfolioAgents,
+    avgScore: avgScore, hasRedline: hasRedline, redlineDetails: redlineDetails, criteriaKeys: criteriaKeys, criterionStats: criterionStats, dataStatus: dataStatus, portfolioAgents: portfolioAgents,
     monthlyBreakdown: monthlyBreakdown, combinedAgentReport: combinedAgentReport, agentByIdent: agentByIdent, agentProfile: agentProfile,
     ticketReport: ticketReport, socialReport: socialReport, callReport: callReport, elementRates: elementRates, dashboard: dashboard,
     callAnalysis: callAnalysis,

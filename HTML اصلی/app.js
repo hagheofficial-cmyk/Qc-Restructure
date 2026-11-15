@@ -725,15 +725,39 @@ function triValue(v) {
 }
 function callRedlineBadge(row, index) {
   return window.QCReports.hasRedline(row, 'call')
-    ? `<button type="button" class="badge bad redline-link" data-call-redline="${index}" title="نمایش توضیحات ردلاین">${fa(1)}</button>` : '-';
+    ? `<button type="button" class="badge bad redline-link" data-call-redline="${index}" title="نمایش علت و کامنت ردلاین">${fa(1)}</button>` : '-';
+}
+function redlineDetailHtml(row) {
+  const d = window.QCReports && window.QCReports.redlineDetails
+    ? window.QCReports.redlineDetails(row)
+    : { reason: String((row && (row.redlineReason || row.reason)) || '').trim(), comment: String((row && (row.qcComment || row.comment)) || '').trim() };
+  if (d.reason && d.comment) {
+    return `<div class="rl-reason">${esc(d.reason)}</div><div class="rl-comment"><span class="rl-tag">کامنت QC:</span> ${esc(d.comment)}</div>`;
+  }
+  if (d.reason) return `<div class="rl-reason">${esc(d.reason)}</div>`;
+  if (d.comment) return `<div class="rl-comment-only"><span class="rl-tag">کامنت QC:</span> ${esc(d.comment)}</div>`;
+  return '<span class="rl-empty">علت و کامنتی در فرم ثبت نشده است</span>';
+}
+function redlineInlineHtml(row) {
+  const d = window.QCReports && window.QCReports.redlineDetails
+    ? window.QCReports.redlineDetails(row)
+    : { reason: String((row && (row.redlineReason || row.reason)) || '').trim(), comment: String((row && (row.qcComment || row.comment)) || '').trim() };
+  if (!d.reason && !d.comment) return '';
+  return `<div class="profile-redline-reason">${d.reason ? `<div class="rl-reason">${esc(d.reason)}</div>` : ''}${d.comment ? `<div class="rl-comment">${d.reason ? '<span class="rl-tag">کامنت QC:</span> ' : ''}${esc(d.comment)}</div>` : ''}</div>`;
 }
 function showCallRedline(row) {
+  const d = window.QCReports && window.QCReports.redlineDetails
+    ? window.QCReports.redlineDetails(row)
+    : { reason: String((row && row.redlineReason) || '').trim(), comment: String((row && row.qcComment) || '').trim() };
+  const rowsHtml = d.reason || d.comment
+    ? `${d.reason ? `<div class="detail-row wide"><div class="k">علت ردلاین</div><div class="v" style="white-space:pre-wrap">${esc(d.reason)}</div></div>` : ''}
+       ${d.comment ? `<div class="detail-row wide"><div class="k">${d.reason ? 'کامنت QC' : 'علت ردلاین (کامنت QC)'}</div><div class="v" style="white-space:pre-wrap">${esc(d.comment)}</div></div>` : ''}`
+    : `<div class="detail-row wide"><div class="k">علت ردلاین</div><div class="v muted">علت و کامنتی در فرم ثبت نشده است</div></div>`;
   modal(`${modalHead('توضیحات ردلاین تماس', 'fa-ban')}<div class="modal-body">
     <div class="detail-rows"><div class="detail-row"><div class="k">کارشناس</div><div class="v">${esc(row.expertName)}</div></div>
       <div class="detail-row"><div class="k">نام شریک</div><div class="v">${esc(row.leadName || '—')}</div></div>
       <div class="detail-row"><div class="k">تاریخ بررسی</div><div class="v">${fa(row.reviewDate)}</div></div>
-      <div class="detail-row wide"><div class="k">علت ردلاین</div><div class="v" style="white-space:pre-wrap">${esc(row.redlineReason || 'علت ردلاین در فرم ثبت نشده است')}</div></div>
-      ${row.qcComment ? `<div class="detail-row wide"><div class="k">کامنت QC</div><div class="v" style="white-space:pre-wrap">${esc(row.qcComment)}</div></div>` : ''}</div>
+      ${rowsHtml}</div>
     </div><div class="modal-foot"><button class="btn ghost" data-close>بستن</button></div>`);
 }
 function bindCallRedlines(root, rows) {
@@ -1316,9 +1340,26 @@ const App = {
   setTitle(t) { $('#pageTitle').textContent = t; document.title = t + ' — سامانه کنترل کیفیت CRM'; },
 
   parseHash() {
-    const h = location.hash.replace(/^#\/?/, '');
+    const raw = (location.hash && location.hash.length > 1) ? location.hash : (this._fallbackHash || '');
+    const h = raw.replace(/^#\/?/, '').split('?')[0].replace(/\/+$/, '');
     const parts = h.split('/');
-    return { name: parts[0] || 'dashboard', arg: parts[1], arg2: parts[2] };
+    let name = parts[0] || 'dashboard';
+    if (name === 'call-report') name = 'callreport';
+    return { name, arg: parts[1], arg2: parts[2] };
+  },
+
+  navigate(href) {
+    const target = String(href || '').startsWith('#/')
+      ? String(href)
+      : '#/' + String(href || '').replace(/^#?\/+/, '');
+    if (location.hash === target) { this.route(); return; }
+    try {
+      this._fallbackHash = target;
+      location.hash = target;
+    } catch (e) {
+      this._fallbackHash = target;
+      this.route();
+    }
   },
 
   async route() {
@@ -1426,6 +1467,13 @@ const App = {
       return;
     }
     if (!this._started) { this.bindDateRangeUI(); this._started = true; }
+    const rawInit = window.APP_SCRIPT_INITIAL_ROUTE;
+    const initRoute = (rawInit && rawInit !== ('__QC_INITIAL_' + 'ROUTE_VALUE__'))
+      ? String(rawInit).replace(/^#?\/+/, '').replace(/[^a-z0-9/_-]/gi, '') : '';
+    if ((!location.hash || location.hash.length <= 1) && initRoute) {
+      window.APP_SCRIPT_INITIAL_ROUTE = '';
+      location.hash = '#/' + (initRoute === 'call-report' ? 'callreport' : initRoute);
+    }
     const target = this.parseHash().name;
     if (window.QCAuth && window.QCAuth.required && !window.QCAuth.can(target)) location.hash = '#/dashboard';
     if (location.hash && location.hash.length > 1) await this.route();
@@ -1449,6 +1497,18 @@ const App = {
     $('#sidebarClose').addEventListener('click', () => this.closeSidebar());
     $('#sidebarBackdrop').addEventListener('click', () => this.closeSidebar());
     $$('.nav-group-title').forEach((g) => g.addEventListener('click', () => g.parentElement.classList.toggle('open')));
+    /* مدیریت مستقیم لینک‌های داخلی #/ برای جلوگیری از تداخل <base target="_top"> در Google Apps Script */
+    document.addEventListener('click', (e) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = e.target && e.target.closest ? e.target.closest('a[href^="#/"]') : null;
+      if (!link) return;
+      const targetAttr = (link.getAttribute('target') || '').toLowerCase();
+      if (targetAttr === '_blank' || targetAttr === '_top') return;
+      const href = link.getAttribute('href');
+      if (!href || !href.startsWith('#/')) return;
+      e.preventDefault();
+      this.navigate(href);
+    });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && $('#sidebar').classList.contains('open')) this.closeSidebar();
     });
@@ -1458,5 +1518,5 @@ const App = {
 
 // اکسپورت سراسری
 window.App = App;
-window.UI = { C, $, $$, esc, fa, el, api, toast, modal, modalHead, confirmDlg, confirmImport, conflictDlg, applyQcIdentity, dateField, combo, multiSelect, triSwitch, redlineSwitch, selectField, scorePill, markBadge, triValue, callRedlineBadge, bindCallRedlines, callTimeCell, slaBadge, durText, rateCell, errorRateCell, pager, emptyState, debounce, scoreBands, scoreColorHex, scoreColorRgba };
+window.UI = { C, $, $$, esc, fa, el, api, toast, modal, modalHead, confirmDlg, confirmImport, conflictDlg, applyQcIdentity, dateField, combo, multiSelect, triSwitch, redlineSwitch, selectField, scorePill, markBadge, triValue, callRedlineBadge, redlineDetailHtml, redlineInlineHtml, bindCallRedlines, callTimeCell, slaBadge, durText, rateCell, errorRateCell, pager, emptyState, debounce, scoreBands, scoreColorHex, scoreColorRgba };
 })();

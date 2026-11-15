@@ -154,7 +154,7 @@ function makeIndex() {
   let html = read(path.join(PUBLIC, 'index.html'));
   const vazir = vazirCss();
   // Route modules and auth must see the hosting mode before they are evaluated.
-  html = html.replace('<head>', '<head><script>window.APP_SCRIPT_MODE = true; window.APP_SCRIPT_URL = \"__QC_APP_SCRIPT_URL__\";</script>');
+  html = html.replace('<head>', '<head><script>window.APP_SCRIPT_MODE = true; window.APP_SCRIPT_URL = "__QC_APP_SCRIPT_URL__"; window.APP_SCRIPT_INITIAL_ROUTE = "__QC_INITIAL_ROUTE_VALUE__";</script>');
 
   // The full Sheets app is already connected directly to the workbook, so hide
   // the optional Node-to-Sheets connector from this standalone build.
@@ -257,7 +257,6 @@ function makeCallReport() {
   html = html.replace(/<link\b[^>]*href=["'][^"']*(?:favicon|apple-touch-icon)[^"']*["'][^>]*>/gi, '');
   const crFavicon = dataUri(path.join(PUBLIC, 'favicon.png'));
   html = html.replace('</head>', `<link rel="icon" type="image/png" href="${crFavicon}">\n</head>`);
-  html = html.replace('</head>', `<link rel="icon" type="image/png" href="${logo}">\n</head>`);
   html = html.replace(/src=(["'])logo\.png(?:\?[^"']*)?\1/g, 'data-app-logo src=""');
   html = html.replace(/<link\b[^>]*href=["']vendor\/fontawesome\/css\/all\.min\.css["'][^>]*>/gi, fontAwesomeTag());
   html = html.replace(/<link\b[^>]*href=["']callReportTheme\.css["'][^>]*>/gi, styleTag(inlineCss(read(path.join(PUBLIC, 'callReportTheme.css')), PUBLIC), 'bundled call report theme'));
@@ -291,9 +290,10 @@ window.APP_SCRIPT_MODE = true;
     document.querySelectorAll('img[data-app-logo]').forEach(function (img) { img.src = "${logo}"; });
   });
 
-  /* این صفحه در Apps Script جدا از سامانه باز می‌شود؛ دکمه‌ی بازگشت می‌گذارد
-   * کاربر بدون گم‌شدن به SPA برگردد (بند ۱۱). */
+  /* این صفحه در Apps Script اگر جداگانه باز شود، دکمه‌ی بازگشت می‌گذارد
+   * کاربر بدون گم‌شدن به SPA برگردد (در حالت iframe/srcdoc نیازی نیست). */
   document.addEventListener('DOMContentLoaded', function () {
+    if (window.parent && window.parent !== window) return;
     if (document.querySelector('.crmqc-back')) return;
     var base = String(window.location.href).split('?')[0];
     var bar = document.createElement('div');

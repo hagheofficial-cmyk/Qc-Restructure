@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
-<head><script>window.APP_SCRIPT_MODE = true; window.APP_SCRIPT_URL = "__QC_APP_SCRIPT_URL__";</script>
+<head><script>window.APP_SCRIPT_MODE = true; window.APP_SCRIPT_URL = "__QC_APP_SCRIPT_URL__"; window.APP_SCRIPT_INITIAL_ROUTE = "__QC_INITIAL_ROUTE_VALUE__";</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>سامانه یکپارچه کنترل کیفیت CRM</title>
@@ -1529,6 +1529,17 @@ table.profile-call-table { width:100%; min-width:0; table-layout:fixed; font-siz
 .capture-host .profile-call-comment, .capture-host .profile-redline-reason { white-space:pre-wrap !important; }
 .capture-host * { animation:none !important; transition:none !important; }
 
+/* نمایش واضح علت ردلاین + کامنت QC در جداول و مودال‌ها */
+.rl-reason { color:var(--bad); font-weight:700; line-height:1.55; }
+.rl-comment, .rl-comment-only { color:var(--ink-2); font-size:12px; line-height:1.55; margin-top:3px; }
+.rl-comment-only { margin-top:0; }
+.rl-tag { display:inline-block; font-size:10.5px; font-weight:700; padding:1px 6px; border-radius:6px; margin-inline-end:4px; background:var(--warn-soft); color:var(--warn); border:1px solid rgba(251,191,36,.28); }
+.rl-empty { color:var(--muted); font-size:12px; }
+[data-theme="light"] .rl-reason { color:#b91c1c; }
+[data-theme="light"] .rl-comment, [data-theme="light"] .rl-comment-only { color:#1f2f46; }
+[data-theme="light"] .rl-tag { background:#fef3c7; color:#92400e; border-color:#f59e0b66; }
+
+
 </style>
 
 <link rel="icon" type="image/png" href="data:image/png;base64,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">
@@ -2442,6 +2453,22 @@ function cleanText(val) {
   if (val === undefined || val === null) return '';
   return String(val).replace(/["']/g, '').trim();
 }
+function cleanOptionalText(val) {
+  if (val === undefined || val === null) return '';
+  let s = String(val).trim();
+  while (s.length >= 2 && ((s[0] === '"' && s[s.length - 1] === '"') || (s[0] === "'" && s[s.length - 1] === "'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  if (!s || /^(-|—|–|null|none|n\/a|nan)$/i.test(s)) return '';
+  return s;
+}
+function normHeader(k) {
+  return String(k == null ? '' : k)
+    .replace(/[\u200c\u200b\u00a0]/g, ' ')
+    .replace(/ي/g, 'ی').replace(/ك/g, 'ک')
+    .trim().toLowerCase()
+    .replace(/[\s_.\-]+/g, ' ');
+}
 
 /* ---------- تبدیل هر نوع تاریخ به اجزای جلالی ---------- */
 /* ورودی: عدد اکسل (میلادی، مثل 46259.49)، رشته ISO/میلادی، رشته شمسی '1405/06/03'
@@ -2459,6 +2486,59 @@ function findKey(row, candidates) {
     if (key != null) return key;
   }
   return null;
+}
+
+/* پیدا کردن ستون‌های علت ردلاین با هر سبک نام‌گذاری در اکسل‌های متابیس/دستی
+ * (مثل redline_reason، Red_line_Reason، redline reason، RED LINE REASON، علت ردلاین، redline_reason_1 و ...) */
+function findRedlineReason(row) {
+  const keys = Object.keys(row || {});
+  const exact = [
+    'redline reason', 'red line reason', 'redline reasons', 'red line reasons',
+    'redline text', 'red line text', 'redline comment', 'red line comment',
+    'redline description', 'red line description', 'redline detail', 'red line detail',
+    'علت ردلاین', 'دلیل ردلاین', 'توضیحات ردلاین', 'توضیح ردلاین', 'شرح ردلاین', 'متن ردلاین', 'علت خط قرمز'
+  ];
+  const matched = [];
+  const pushKey = (k) => { if (k != null && !matched.includes(k)) matched.push(k); };
+  for (const cand of exact) {
+    for (const k of keys) {
+      if (normHeader(k) === cand) pushKey(k);
+    }
+  }
+  for (const k of keys) {
+    const nh = normHeader(k);
+    const isRedlineCol = /(?:red ?line|ردلاین|خط قرمز)/.test(nh);
+    const hasReasonWord = /(?:reason|desc|detail|text|comment|note|علت|دلیل|شرح|توضیح|متن)/.test(nh);
+    if (isRedlineCol && hasReasonWord) pushKey(k);
+  }
+  const values = [];
+  for (const k of matched) {
+    const v = cleanOptionalText(row[k]);
+    if (v && !values.includes(v)) values.push(v);
+  }
+  return values.join(' — ');
+}
+
+function findQcComment(row) {
+  const keys = Object.keys(row || {});
+  const exact = [
+    'qc comment', 'qc comments', 'کامنت qc', 'توضیحات qc', 'توضیح qc', 'یادداشت qc',
+    'کامنت', 'توضیحات کارشناس qc', 'comment', 'comments'
+  ];
+  const matched = [];
+  const pushKey = (k) => { if (k != null && !matched.includes(k)) matched.push(k); };
+  for (const cand of exact) {
+    for (const k of keys) {
+      const nh = normHeader(k);
+      if (nh === cand || nh.replace(/\s+\d+$/, '') === cand) pushKey(k);
+    }
+  }
+  const values = [];
+  for (const k of matched) {
+    const v = cleanOptionalText(row[k]);
+    if (v && !values.includes(v)) values.push(v);
+  }
+  return values.join(' — ');
 }
 
 /* ---------- پارس ردیف‌های یک فرم (دقیقاً منطق پنل به‌علاوه‌ی تبدیل تاریخ) ---------- */
@@ -2482,7 +2562,6 @@ function parseRows(rows, type, options) {
     const redlineKey = ['redline', 'red_line', 'red line']
       .map((cand) => findKey(r, [cand]))
       .find((k) => k != null && cleanText(r[k]) !== '') || findKey(r, ['redline', 'red_line', 'red line']);
-    const redlineReasonKey = findKey(r, ['redline_reason', 'red_line_reason', 'red line reason', 'علت ردلاین', 'علت خط قرمز']);
     const lsKey = findKey(r, ['listening_duration', 'listening duration', 'listening time (second)', 'listening_time_(second)', 'listening_time_second', 'listening_time']);
     // تاریخ بررسیِ غیرخالی ولی نامعتبر را با تاریخ تماس جایگزین نکنیم.
     const reviewKey = dt.slice(0, -2).map((key) => findKey(r, [key])).find((key) => key != null && cleanText(r[key]) !== '');
@@ -2491,13 +2570,13 @@ function parseRows(rows, type, options) {
     const qcKey = findKey(r, ['qc_expert_name', 'qc_agent', 'qcagent']);
     const leadKey = findKey(r, ['lead_name', 'lead name']);
     const phoneKey = findKey(r, ['lead_phone', 'lead phone']);
-    const commentKey = findKey(r, ['qc_comment', 'qc comment', 'کامنت']);
     const durationKey = findKey(r, ['call_duration', 'call duration', 'call_duration_second', 'call_duration (second)', 'conversation_time', 'talk_time', 'مدت مکالمه', 'تایم مکالمه']);
     const idKey = findKey(r, ['evaluation_id', 'form_id', 'call_id']);
 
     const score = C.normalizeScore(scoreKey ? r[scoreKey] : null);
     const redline = isRedline(redlineKey ? r[redlineKey] : null) ? 1 : 0;
-    const redlineReason = redlineReasonKey ? cleanText(r[redlineReasonKey]) : '';
+    const redlineReason = findRedlineReason(r);
+    const qcComment = findQcComment(r);
 
     const teamColumn = findKey(r, ['team', 'team_name', 'تیم']);
     const colTeam = teamColumn ? cleanText(r[teamColumn]) : '';
@@ -2526,7 +2605,7 @@ function parseRows(rows, type, options) {
       listeningTime: lsKey ? cleanText(r[lsKey]) || '-' : '-',
       callDuration: durationKey ? cleanText(r[durationKey]) : '',
       qcAgent: qcKey ? normName(cleanText(r[qcKey])) : '',
-      qcComment: commentKey ? cleanText(r[commentKey]) : '',
+      qcComment,
       reviewDate: dateKey ? cleanQcDate(r[dateKey]) : '',
       callDate: actionDateKey ? cleanQcDate(r[actionDateKey]) : '',
       sourceRow: index + 2,
@@ -3026,6 +3105,7 @@ function importDiagnostics(rows, agents) {
 return {
   clearResolveCache: clearResolveCache,
   PARSER_VERSION: 4, anyToJalali, cleanQcDate, parseRows, parseSituationalRows,
+  findRedlineReason, findQcComment,
   isSituationalFile, classifyCallFile, situationalRowKey, dateRangeOfCalls,
   classifyMonthlyScoreFile, parseMonthlyScoreRows, monthlyScoreRowKey,
   formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey,
@@ -3358,6 +3438,30 @@ window.QC_SEED = {"version":2,"agents":[{"id":1,"ext":3073,"name":"مبینا س
   function hasRedline(row, type) {
     // در فرم تیکت ۰ ردلاین است؛ در تماس (و سوشال دارای پرچم صریح) ۱.
     return C.normalizeTri(row.redline) === (type === 'ticket' ? 0 : 1);
+  }
+  function cleanRedlineText(v) {
+    if (v === undefined || v === null) return '';
+    var s = String(v).trim();
+    while (s.length >= 2 && ((s[0] === '"' && s[s.length - 1] === '"') || (s[0] === "'" && s[s.length - 1] === "'"))) {
+      s = s.slice(1, -1).trim();
+    }
+    if (!s || /^(-|—|–|null|none|n\/a|nan)$/i.test(s)) return '';
+    return s;
+  }
+  function redlineDetails(row) {
+    var r = row || {};
+    var reason = cleanRedlineText(r.redlineReason != null ? r.redlineReason : r.reason);
+    var comment = cleanRedlineText(r.qcComment != null ? r.qcComment : r.comment);
+    var same = !!(reason && comment && reason === comment);
+    var parts = [];
+    if (reason) parts.push(reason);
+    if (comment && !same) parts.push(comment);
+    return {
+      reason: reason,
+      comment: same ? '' : comment,
+      text: parts.join(' — '),
+      hasAny: parts.length > 0
+    };
   }
   function redlineCount(rows, type) { return (rows || []).filter(function (r) { return hasRedline(r, type); }).length; }
 
@@ -3774,10 +3878,11 @@ window.QC_SEED = {"version":2,"agents":[{"id":1,"ext":3073,"name":"مبینا س
       return { form: ft, count: rs.length, rates: list, weak: weak.length };
     }).filter(Boolean);
 
-    /* ردلاین‌های کارشناس با علت */
+    /* ردلاین‌های کارشناس با علت و کامنت */
     var redlineRows = Ph.filter(function (r) { return hasRedline(r, 'call'); }).map(function (r) {
-      return { score: r.score, reason: r.redlineReason || '', date: r.reviewDate,
-               formType: r.formType, leadName: r.leadName, leadPhone: r.leadPhone, qcComment: r.qcComment || '' };
+      var d = redlineDetails(r);
+      return { score: r.score, reason: d.reason, redlineReason: d.reason, qcComment: cleanRedlineText(r.qcComment), detailText: d.text, date: r.reviewDate,
+               formType: r.formType, leadName: r.leadName, leadPhone: r.leadPhone };
     }).sort(function (x, y) { return (y.date || '').localeCompare(x.date || ''); });
 
     return {
@@ -3975,8 +4080,10 @@ window.QC_SEED = {"version":2,"agents":[{"id":1,"ext":3073,"name":"مبینا س
 
     /* ردلاین‌ها */
     var redlines = Ph.filter(function (r) { return hasRedline(r, 'call'); }).map(function (r) {
+      var d = redlineDetails(r);
       return { expertName: r.expertName, leadName: r.leadName, leadPhone: r.leadPhone, formType: r.formType,
-        score: r.score, reason: r.redlineReason || '', date: r.reviewDate, sourceFile: r.sourceFile };
+        score: r.score, reason: d.reason, redlineReason: d.reason, qcComment: cleanRedlineText(r.qcComment), detailText: d.text,
+        date: r.reviewDate, sourceFile: r.sourceFile };
     }).sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
 
     /* Keep each weakness tied to the same evaluation as its QC comment. A
@@ -4115,7 +4222,7 @@ window.QC_SEED = {"version":2,"agents":[{"id":1,"ext":3073,"name":"مبینا س
     effectiveChannelScore: effectiveChannelScore, computeWeightedScore: computeWeightedScore,
     situationalAvgOf: situationalAvgOf, aggregateSituational: aggregateSituational,
     scoredRows: scoredRows,
-    avgScore: avgScore, hasRedline: hasRedline, criteriaKeys: criteriaKeys, criterionStats: criterionStats, dataStatus: dataStatus, portfolioAgents: portfolioAgents,
+    avgScore: avgScore, hasRedline: hasRedline, redlineDetails: redlineDetails, criteriaKeys: criteriaKeys, criterionStats: criterionStats, dataStatus: dataStatus, portfolioAgents: portfolioAgents,
     monthlyBreakdown: monthlyBreakdown, combinedAgentReport: combinedAgentReport, agentByIdent: agentByIdent, agentProfile: agentProfile,
     ticketReport: ticketReport, socialReport: socialReport, callReport: callReport, elementRates: elementRates, dashboard: dashboard,
     callAnalysis: callAnalysis,
@@ -7480,9 +7587,13 @@ window.QCExport = {
       const subset = (calls || []).filter((r) => r.formType === form);
       if (!subset.length) continue;
       const keys = QCReports.criteriaKeys(subset, form, QCParse);
-      const header = ['نام کارشناس', 'نمره کلی تماس', 'نام شریک', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین ها', 'توضیحات ردلاین'];
-      const data = subset.map((r) => [r.expertName, C.normalizeScore(r.score), r.leadName,
-        ...keys.map((key) => C.normalizeTri((r.elements || {})[key])), QCReports.hasRedline(r, 'call') ? 1 : '-', r.redlineReason || '']);
+      const header = ['نام کارشناس', 'نمره کلی تماس', 'نام شریک', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین ها', 'توضیحات ردلاین', 'کامنت QC'];
+      const data = subset.map((r) => {
+        const isRl = QCReports.hasRedline(r, 'call');
+        const d = QCReports.redlineDetails(r);
+        return [r.expertName, C.normalizeScore(r.score), r.leadName,
+          ...keys.map((key) => C.normalizeTri((r.elements || {})[key])), isRl ? 1 : '-', isRl ? d.text : (d.reason || ''), r.qcComment || ''];
+      });
       XLSX.utils.book_append_sheet(wb, mk([header, ...data]), 'جزئیات ' + ({ tele: 'Telesales', account: 'اکانت', mlm: 'MLM' }[form]));
     }
     download(wb, `QC_Call_Report_${stamp()}.xlsx`);
@@ -8675,15 +8786,39 @@ function triValue(v) {
 }
 function callRedlineBadge(row, index) {
   return window.QCReports.hasRedline(row, 'call')
-    ? `<button type="button" class="badge bad redline-link" data-call-redline="${index}" title="نمایش توضیحات ردلاین">${fa(1)}</button>` : '-';
+    ? `<button type="button" class="badge bad redline-link" data-call-redline="${index}" title="نمایش علت و کامنت ردلاین">${fa(1)}</button>` : '-';
+}
+function redlineDetailHtml(row) {
+  const d = window.QCReports && window.QCReports.redlineDetails
+    ? window.QCReports.redlineDetails(row)
+    : { reason: String((row && (row.redlineReason || row.reason)) || '').trim(), comment: String((row && (row.qcComment || row.comment)) || '').trim() };
+  if (d.reason && d.comment) {
+    return `<div class="rl-reason">${esc(d.reason)}</div><div class="rl-comment"><span class="rl-tag">کامنت QC:</span> ${esc(d.comment)}</div>`;
+  }
+  if (d.reason) return `<div class="rl-reason">${esc(d.reason)}</div>`;
+  if (d.comment) return `<div class="rl-comment-only"><span class="rl-tag">کامنت QC:</span> ${esc(d.comment)}</div>`;
+  return '<span class="rl-empty">علت و کامنتی در فرم ثبت نشده است</span>';
+}
+function redlineInlineHtml(row) {
+  const d = window.QCReports && window.QCReports.redlineDetails
+    ? window.QCReports.redlineDetails(row)
+    : { reason: String((row && (row.redlineReason || row.reason)) || '').trim(), comment: String((row && (row.qcComment || row.comment)) || '').trim() };
+  if (!d.reason && !d.comment) return '';
+  return `<div class="profile-redline-reason">${d.reason ? `<div class="rl-reason">${esc(d.reason)}</div>` : ''}${d.comment ? `<div class="rl-comment">${d.reason ? '<span class="rl-tag">کامنت QC:</span> ' : ''}${esc(d.comment)}</div>` : ''}</div>`;
 }
 function showCallRedline(row) {
+  const d = window.QCReports && window.QCReports.redlineDetails
+    ? window.QCReports.redlineDetails(row)
+    : { reason: String((row && row.redlineReason) || '').trim(), comment: String((row && row.qcComment) || '').trim() };
+  const rowsHtml = d.reason || d.comment
+    ? `${d.reason ? `<div class="detail-row wide"><div class="k">علت ردلاین</div><div class="v" style="white-space:pre-wrap">${esc(d.reason)}</div></div>` : ''}
+       ${d.comment ? `<div class="detail-row wide"><div class="k">${d.reason ? 'کامنت QC' : 'علت ردلاین (کامنت QC)'}</div><div class="v" style="white-space:pre-wrap">${esc(d.comment)}</div></div>` : ''}`
+    : `<div class="detail-row wide"><div class="k">علت ردلاین</div><div class="v muted">علت و کامنتی در فرم ثبت نشده است</div></div>`;
   modal(`${modalHead('توضیحات ردلاین تماس', 'fa-ban')}<div class="modal-body">
     <div class="detail-rows"><div class="detail-row"><div class="k">کارشناس</div><div class="v">${esc(row.expertName)}</div></div>
       <div class="detail-row"><div class="k">نام شریک</div><div class="v">${esc(row.leadName || '—')}</div></div>
       <div class="detail-row"><div class="k">تاریخ بررسی</div><div class="v">${fa(row.reviewDate)}</div></div>
-      <div class="detail-row wide"><div class="k">علت ردلاین</div><div class="v" style="white-space:pre-wrap">${esc(row.redlineReason || 'علت ردلاین در فرم ثبت نشده است')}</div></div>
-      ${row.qcComment ? `<div class="detail-row wide"><div class="k">کامنت QC</div><div class="v" style="white-space:pre-wrap">${esc(row.qcComment)}</div></div>` : ''}</div>
+      ${rowsHtml}</div>
     </div><div class="modal-foot"><button class="btn ghost" data-close>بستن</button></div>`);
 }
 function bindCallRedlines(root, rows) {
@@ -9266,9 +9401,26 @@ const App = {
   setTitle(t) { $('#pageTitle').textContent = t; document.title = t + ' — سامانه کنترل کیفیت CRM'; },
 
   parseHash() {
-    const h = location.hash.replace(/^#\/?/, '');
+    const raw = (location.hash && location.hash.length > 1) ? location.hash : (this._fallbackHash || '');
+    const h = raw.replace(/^#\/?/, '').split('?')[0].replace(/\/+$/, '');
     const parts = h.split('/');
-    return { name: parts[0] || 'dashboard', arg: parts[1], arg2: parts[2] };
+    let name = parts[0] || 'dashboard';
+    if (name === 'call-report') name = 'callreport';
+    return { name, arg: parts[1], arg2: parts[2] };
+  },
+
+  navigate(href) {
+    const target = String(href || '').startsWith('#/')
+      ? String(href)
+      : '#/' + String(href || '').replace(/^#?\/+/, '');
+    if (location.hash === target) { this.route(); return; }
+    try {
+      this._fallbackHash = target;
+      location.hash = target;
+    } catch (e) {
+      this._fallbackHash = target;
+      this.route();
+    }
   },
 
   async route() {
@@ -9376,6 +9528,13 @@ const App = {
       return;
     }
     if (!this._started) { this.bindDateRangeUI(); this._started = true; }
+    const rawInit = window.APP_SCRIPT_INITIAL_ROUTE;
+    const initRoute = (rawInit && rawInit !== ('__QC_INITIAL_' + 'ROUTE_VALUE__'))
+      ? String(rawInit).replace(/^#?\/+/, '').replace(/[^a-z0-9/_-]/gi, '') : '';
+    if ((!location.hash || location.hash.length <= 1) && initRoute) {
+      window.APP_SCRIPT_INITIAL_ROUTE = '';
+      location.hash = '#/' + (initRoute === 'call-report' ? 'callreport' : initRoute);
+    }
     const target = this.parseHash().name;
     if (window.QCAuth && window.QCAuth.required && !window.QCAuth.can(target)) location.hash = '#/dashboard';
     if (location.hash && location.hash.length > 1) await this.route();
@@ -9399,6 +9558,18 @@ const App = {
     $('#sidebarClose').addEventListener('click', () => this.closeSidebar());
     $('#sidebarBackdrop').addEventListener('click', () => this.closeSidebar());
     $$('.nav-group-title').forEach((g) => g.addEventListener('click', () => g.parentElement.classList.toggle('open')));
+    /* مدیریت مستقیم لینک‌های داخلی #/ برای جلوگیری از تداخل <base target="_top"> در Google Apps Script */
+    document.addEventListener('click', (e) => {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+      const link = e.target && e.target.closest ? e.target.closest('a[href^="#/"]') : null;
+      if (!link) return;
+      const targetAttr = (link.getAttribute('target') || '').toLowerCase();
+      if (targetAttr === '_blank' || targetAttr === '_top') return;
+      const href = link.getAttribute('href');
+      if (!href || !href.startsWith('#/')) return;
+      e.preventDefault();
+      this.navigate(href);
+    });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && $('#sidebar').classList.contains('open')) this.closeSidebar();
     });
@@ -9408,7 +9579,7 @@ const App = {
 
 // اکسپورت سراسری
 window.App = App;
-window.UI = { C, $, $$, esc, fa, el, api, toast, modal, modalHead, confirmDlg, confirmImport, conflictDlg, applyQcIdentity, dateField, combo, multiSelect, triSwitch, redlineSwitch, selectField, scorePill, markBadge, triValue, callRedlineBadge, bindCallRedlines, callTimeCell, slaBadge, durText, rateCell, errorRateCell, pager, emptyState, debounce, scoreBands, scoreColorHex, scoreColorRgba };
+window.UI = { C, $, $$, esc, fa, el, api, toast, modal, modalHead, confirmDlg, confirmImport, conflictDlg, applyQcIdentity, dateField, combo, multiSelect, triSwitch, redlineSwitch, selectField, scorePill, markBadge, triValue, callRedlineBadge, redlineDetailHtml, redlineInlineHtml, bindCallRedlines, callTimeCell, slaBadge, durText, rateCell, errorRateCell, pager, emptyState, debounce, scoreBands, scoreColorHex, scoreColorRgba };
 })();
 
 </script>
@@ -11104,7 +11275,7 @@ function callDetailsHTML(calls) {
       </tr></thead><tbody>${rows.map((r) => `<tr>
         <td class="cell-main">${esc(r.expertName)}</td><td>${scorePill(r.score)}</td><td class="cell-main">${esc(r.leadName || '—')}</td>
         ${keys.map((key) => `<td>${triValue(QCParse.elementValue(r,key))}</td>`).join('')}
-        <td>${callRedlineBadge(r, calls.indexOf(r))}</td></tr>`).join('')}</tbody></table></div>`;
+        <td>${callRedlineBadge(r, calls.indexOf(r))}${QCReports.hasRedline(r, 'call') ? UI.redlineInlineHtml(r) : ''}</td></tr>`).join('')}</tbody></table></div>`;
   }).join('');
   return `<div class="card" id="callDetailCard" style="margin-bottom:16px">
     <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-phone"></i></div>
@@ -11421,9 +11592,9 @@ ${elementsCardHTML('teal')}`;
         const group = button.dataset.callGroup;
         const flagged = (data.redlineRows || []).filter((r) => QCReports.hasRedline(r, 'call') && (isTeam ? r.currentTeam : r.expertName) === group);
         UI.modal(`${UI.modalHead('توضیحات ردلاین‌ها — ' + group, 'fa-ban')}<div class="modal-body"><div class="table-wrap">
-          <table class="tbl"><thead><tr><th>نام کارشناس</th><th>نام شریک</th><th>تاریخ بررسی</th><th>علت ردلاین</th></tr></thead>
+          <table class="tbl"><thead><tr><th>نام کارشناس</th><th>نام شریک</th><th>تاریخ بررسی</th><th>علت ردلاین و کامنت QC</th></tr></thead>
           <tbody>${flagged.map((r) => `<tr><td>${esc(r.expertName)}</td><td>${esc(r.leadName || '—')}</td><td>${fa(r.reviewDate)}</td>
-            <td style="white-space:pre-wrap">${esc(r.redlineReason || 'علت ردلاین در فرم ثبت نشده است')}</td></tr>`).join('')}</tbody></table>
+            <td style="white-space:pre-wrap">${UI.redlineDetailHtml(r)}</td></tr>`).join('')}</tbody></table>
           </div></div><div class="modal-foot"><button class="btn ghost" data-close>بستن</button></div>`, { lg: true });
       }));
     }
@@ -12909,7 +13080,7 @@ async function render(root, arg) {
           <td>${esc(FORM_TYPE_FA[row.formType] || row.formType || '—')}</td>
           <td>${scorePill(row.score)}</td>
           ${columns.map(col => `<td class="profile-criterion-value">${matrix[index].has(col.identity) ? triValue(matrix[index].get(col.identity)) : '<span title="این المان برای این فرم نیست">·</span>'}</td>`).join('')}
-          <td>${callRedlineBadge(row, index)}${row.redlineReason ? `<div class="profile-redline-reason">${esc(row.redlineReason)}</div>` : ''}</td>
+          <td>${callRedlineBadge(row, index)}${QCReports.hasRedline(row, 'call') ? UI.redlineInlineHtml(row) : ''}</td>
           <td>${callTimeCell(row)}</td>
           <td class="profile-call-comment">${esc(row.qcComment || '—')}</td>
         </tr>`).join('')}</tbody></table>`;
@@ -13138,13 +13309,13 @@ async function render(root, arg) {
         <div class="head-icon" style="background:var(--bad-soft);color:var(--bad)"><i class="fa-solid fa-ban"></i></div>
         <div><h3>ردلاین‌ها (${fa(redlineRows.length)} مورد)</h3><div class="sub">علت و جزئیات هر ردلاین — کلیک روی لید = جستجو</div></div></div>
       <div class="table-wrap">
-        <table class="tbl"><thead><tr><th>تاریخ</th><th>لید</th><th>نوع</th><th>نمره</th><th>علت ردلاین</th></tr></thead>
+        <table class="tbl"><thead><tr><th>تاریخ</th><th>لید</th><th>نوع</th><th>نمره</th><th>علت ردلاین و کامنت QC</th></tr></thead>
         <tbody>${redlineRows.map((r) => `<tr>
           <td dir="ltr">${fa(r.date || '—')}</td>
           <td>${esc(r.leadName || '—')}<div style="font-size:10px;color:var(--muted)" dir="ltr">${esc(r.leadPhone || '')}</div></td>
           <td><span class="tag-team">${FORM_TYPE_FA[r.formType] || r.formType}</span></td>
           <td>${r.score != null ? scorePill(r.score) : '—'}</td>
-          <td style="font-size:12px;color:var(--bad);max-width:300px">${esc(r.reason || '(ثبت نشده)')}${r.qcComment ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">"${esc(r.qcComment)}"</div>` : ''}</td>
+          <td style="font-size:12px;max-width:340px;white-space:pre-wrap">${UI.redlineDetailHtml(r)}</td>
         </tr>`).join('')}</tbody></table></div></div>`;
   }
 
@@ -13384,9 +13555,12 @@ async function render(root, arg) {
       const calls = curData.calls.rows.filter((r) => r.formType === form);
       const keys = QCReports.criteriaKeys(calls, form, QCParse);
       return { name: FORM_TYPE_FA[form], rows: [
-        ['لید', 'شماره تماس', 'نمره', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین', 'علت ردلاین', 'تایم مکالمه', 'زمان شنود', 'تاریخ بررسی'],
-        ...calls.map((r) => [r.leadName, r.leadPhone, C.normalizeScore(r.score), ...keys.map((key) => C.normalizeTri((r.elements || {})[key])),
-          QCReports.hasRedline(r, 'call') ? 1 : '-', r.redlineReason || '', r.callDuration || '', r.listeningTime || '', r.reviewDate])
+        ['لید', 'شماره تماس', 'نمره', ...keys.map((key) => QCParse.labelOf(form, key)), 'ردلاین', 'علت ردلاین', 'کامنت QC', 'تایم مکالمه', 'زمان شنود', 'تاریخ بررسی'],
+        ...calls.map((r) => {
+          const d = QCReports.redlineDetails(r);
+          return [r.leadName, r.leadPhone, C.normalizeScore(r.score), ...keys.map((key) => C.normalizeTri((r.elements || {})[key])),
+            QCReports.hasRedline(r, 'call') ? 1 : '-', QCReports.hasRedline(r, 'call') ? d.text : (d.reason || ''), r.qcComment || '', r.callDuration || '', r.listeningTime || '', r.reviewDate];
+        })
       ] };
     }).filter((sheet) => sheet.rows.length > 1);
     const sitSheets = (curData.situational && curData.situational.hasData) ? [{
@@ -14589,7 +14763,7 @@ async function render(root) {
               <div style="flex:1;font-size:12px">
                 <b class="agent-row" data-agent="${esc(r.expertName)}" style="cursor:pointer;color:var(--brand)">${esc(r.expertName)}</b>
                 <span style="color:var(--muted)"> · ${esc(FORM_FA[r.formType] || r.formType || '—')} · نمره ${r.score != null ? esc(fa(r.score)) : '—'}</span>
-                <div style="color:var(--bad);margin-top:4px">${esc(r.reason || '(علت ثبت نشده)')}</div>
+                <div style="margin-top:4px;white-space:pre-wrap">${UI.redlineDetailHtml(r)}</div>
                 <div style="font-size:10px;color:var(--muted);margin-top:4px">لید: ${esc(r.leadName || '—')}${r.leadPhone ? ' (' + esc(r.leadPhone) + ')' : ''} · ${esc(r.date || '—')}</div>
               </div>
             </div>`).join('')}</div>
@@ -14685,8 +14859,11 @@ async function render(root) {
         ]});
       }
       sheets.push({ name: 'ردلاین‌ها', rows: [
-        ['کارشناس', 'تیم', 'نمره', 'علت', 'لید', 'تلفن لید', 'تاریخ', 'فایل'],
-        ...(an.redlines || []).map((r) => [r.expertName, r.formType, r.score, r.reason, r.leadName, r.leadPhone, r.date, r.sourceFile || ''])
+        ['کارشناس', 'تیم', 'نمره', 'علت ردلاین', 'کامنت QC', 'لید', 'تلفن لید', 'تاریخ', 'فایل'],
+        ...(an.redlines || []).map((r) => {
+          const d = QCReports.redlineDetails(r);
+          return [r.expertName, r.formType, r.score, d.reason || d.comment, r.qcComment || '', r.leadName, r.leadPhone, r.date, r.sourceFile || ''];
+        })
       ]});
       sheets.push({ name: 'کامنت‌های QC', rows: [
         ['کارشناس', 'تیم', 'نمره', 'کامنت', 'المان‌های نقطه‌ضعف', 'لید', 'تلفن لید', 'تاریخ'],
@@ -14726,8 +14903,14 @@ App.register('call-analysis', { title: 'تحلیل ریت تماس', render });
 'use strict';
 const { $, esc } = UI;
 
-const STANDALONE = !!(window.APP_SCRIPT_MODE && window.APP_SCRIPT_URL);
-const SRC = STANDALONE ? window.APP_SCRIPT_URL + '#/callreport' : 'call-admin-report.html';
+function isStandalone() {
+  return !!window.APP_SCRIPT_MODE;
+}
+function standaloneSrc() {
+  const base = String(window.APP_SCRIPT_URL || '').trim();
+  if (!base || base === ('__QC_APP_' + 'SCRIPT_URL__')) return '#/callreport';
+  return base + (base.includes('?') ? '&' : '?') + 'route=callreport#/callreport';
+}
 
 async function loadSystemAgents() {
   try {
@@ -14738,17 +14921,18 @@ async function loadSystemAgents() {
 }
 
 function rangeSource() {
-  if (STANDALONE) return SRC; // New tab enters the authenticated SPA, never a public report URL.
+  if (isStandalone()) return standaloneSrc(); // New tab enters the authenticated SPA, never a public report URL.
+  const src = 'call-admin-report.html';
   const params = new URLSearchParams();
   if (App.dateRange.from) params.set('qcFrom', App.dateRange.from);
   if (App.dateRange.to) params.set('qcTo', App.dateRange.to);
   params.set('qcTheme', App.theme);
   const qs = params.toString();
-  return SRC + (qs ? (SRC.includes('?') ? '&' : '?') + qs : '');
+  return src + (qs ? (src.includes('?') ? '&' : '?') + qs : '');
 }
 
 function render(root) {
-  if (STANDALONE) return renderStandalone(root);
+  if (isStandalone()) return renderStandalone(root);
 
   const src = rangeSource();
   root.innerHTML = `
@@ -14812,7 +14996,7 @@ function renderStandalone(root) {
   const token = (window.QCAuth && window.QCAuth.token) || '';
   if (reportCacheToken !== token) { reportHtmlCache = null; reportHtmlPending = false; reportCacheToken = token; }
   if (!window.QCAuth || !window.QCAuth.user || window.QCAuth.user.role !== 'admin') {
-    root.innerHTML = '<div class="note">گزارش تماس قدیمی فقط برای مدیر در دسترس است.</div>'; return;
+    root.innerHTML = '<div class="note">گزارش تماس فقط برای مدیر واردشده در دسترس است.</div>'; return;
   }
   const params = new URLSearchParams();
   if (App.dateRange.from) params.set('qcFrom', App.dateRange.from);
@@ -14883,8 +15067,8 @@ function renderStandalone(root) {
     const initialAgents = (App.state && Array.isArray(App.state.agents)) ? App.state.agents : [];
     const safeJson = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
     const withParams = `<script>window.__QC_CALL_REPORT_PARAMS__ = ${safeJson('?' + params.toString())};window.__QC_SYSTEM_AGENTS__ = ${safeJson(initialAgents)};<\/script>`;
-    const full = doc.indexOf('<head>') >= 0
-      ? doc.replace('<head>', '<head>' + bridgeScript() + withParams)
+    const full = /<head\b[^>]*>/i.test(doc)
+      ? doc.replace(/<head\b[^>]*>/i, (m) => m + bridgeScript() + withParams)
       : bridgeScript() + withParams + doc;
     frame = document.createElement('iframe');
     frame.className = 'cr-embed-frame';
@@ -14930,7 +15114,8 @@ function renderStandalone(root) {
     setState('<i class="fa-solid fa-circle-notch spin"></i> در حال آماده‌سازی ابزار…');
     google.script.run
       .withSuccessHandler((html) => {
-        if (reportCacheToken !== token || !window.QCAuth || window.QCAuth.token !== token) return;
+        const curToken = (window.QCAuth && window.QCAuth.token) || '';
+        if (reportCacheToken !== token || curToken !== token) return;
         reportHtmlPending = false;
         if (!html) { fallback('نسخه‌ی مستقر، تابع گزارش تماس را ندارد؛ Code.gs جدید را جای‌گذاری کنید'); return; }
         reportHtmlCache = html;

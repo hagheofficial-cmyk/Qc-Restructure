@@ -72,7 +72,7 @@ function callDetailsHTML(calls) {
       </tr></thead><tbody>${rows.map((r) => `<tr>
         <td class="cell-main">${esc(r.expertName)}</td><td>${scorePill(r.score)}</td><td class="cell-main">${esc(r.leadName || '—')}</td>
         ${keys.map((key) => `<td>${triValue(QCParse.elementValue(r,key))}</td>`).join('')}
-        <td>${callRedlineBadge(r, calls.indexOf(r))}</td></tr>`).join('')}</tbody></table></div>`;
+        <td>${callRedlineBadge(r, calls.indexOf(r))}${QCReports.hasRedline(r, 'call') ? UI.redlineInlineHtml(r) : ''}</td></tr>`).join('')}</tbody></table></div>`;
   }).join('');
   return `<div class="card" id="callDetailCard" style="margin-bottom:16px">
     <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-phone"></i></div>
@@ -389,9 +389,9 @@ ${elementsCardHTML('teal')}`;
         const group = button.dataset.callGroup;
         const flagged = (data.redlineRows || []).filter((r) => QCReports.hasRedline(r, 'call') && (isTeam ? r.currentTeam : r.expertName) === group);
         UI.modal(`${UI.modalHead('توضیحات ردلاین‌ها — ' + group, 'fa-ban')}<div class="modal-body"><div class="table-wrap">
-          <table class="tbl"><thead><tr><th>نام کارشناس</th><th>نام شریک</th><th>تاریخ بررسی</th><th>علت ردلاین</th></tr></thead>
+          <table class="tbl"><thead><tr><th>نام کارشناس</th><th>نام شریک</th><th>تاریخ بررسی</th><th>علت ردلاین و کامنت QC</th></tr></thead>
           <tbody>${flagged.map((r) => `<tr><td>${esc(r.expertName)}</td><td>${esc(r.leadName || '—')}</td><td>${fa(r.reviewDate)}</td>
-            <td style="white-space:pre-wrap">${esc(r.redlineReason || 'علت ردلاین در فرم ثبت نشده است')}</td></tr>`).join('')}</tbody></table>
+            <td style="white-space:pre-wrap">${UI.redlineDetailHtml(r)}</td></tr>`).join('')}</tbody></table>
           </div></div><div class="modal-foot"><button class="btn ghost" data-close>بستن</button></div>`, { lg: true });
       }));
     }

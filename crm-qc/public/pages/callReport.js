@@ -9,8 +9,14 @@
 'use strict';
 const { $, esc } = UI;
 
-const STANDALONE = !!(window.APP_SCRIPT_MODE && window.APP_SCRIPT_URL);
-const SRC = STANDALONE ? window.APP_SCRIPT_URL + '#/callreport' : 'call-admin-report.html';
+function isStandalone() {
+  return !!window.APP_SCRIPT_MODE;
+}
+function standaloneSrc() {
+  const base = String(window.APP_SCRIPT_URL || '').trim();
+  if (!base || base === ('__QC_APP_' + 'SCRIPT_URL__')) return '#/callreport';
+  return base + (base.includes('?') ? '&' : '?') + 'route=callreport#/callreport';
+}
 
 async function loadSystemAgents() {
   try {
@@ -21,17 +27,18 @@ async function loadSystemAgents() {
 }
 
 function rangeSource() {
-  if (STANDALONE) return SRC; // New tab enters the authenticated SPA, never a public report URL.
+  if (isStandalone()) return standaloneSrc(); // New tab enters the authenticated SPA, never a public report URL.
+  const src = 'call-admin-report.html';
   const params = new URLSearchParams();
   if (App.dateRange.from) params.set('qcFrom', App.dateRange.from);
   if (App.dateRange.to) params.set('qcTo', App.dateRange.to);
   params.set('qcTheme', App.theme);
   const qs = params.toString();
-  return SRC + (qs ? (SRC.includes('?') ? '&' : '?') + qs : '');
+  return src + (qs ? (src.includes('?') ? '&' : '?') + qs : '');
 }
 
 function render(root) {
-  if (STANDALONE) return renderStandalone(root);
+  if (isStandalone()) return renderStandalone(root);
 
   const src = rangeSource();
   root.innerHTML = `
@@ -95,7 +102,7 @@ function renderStandalone(root) {
   const token = (window.QCAuth && window.QCAuth.token) || '';
   if (reportCacheToken !== token) { reportHtmlCache = null; reportHtmlPending = false; reportCacheToken = token; }
   if (!window.QCAuth || !window.QCAuth.user || window.QCAuth.user.role !== 'admin') {
-    root.innerHTML = '<div class="note">گزارش تماس قدیمی فقط برای مدیر در دسترس است.</div>'; return;
+    root.innerHTML = '<div class="note">گزارش تماس فقط برای مدیر واردشده در دسترس است.</div>'; return;
   }
   const params = new URLSearchParams();
   if (App.dateRange.from) params.set('qcFrom', App.dateRange.from);
@@ -166,8 +173,8 @@ function renderStandalone(root) {
     const initialAgents = (App.state && Array.isArray(App.state.agents)) ? App.state.agents : [];
     const safeJson = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
     const withParams = `<script>window.__QC_CALL_REPORT_PARAMS__ = ${safeJson('?' + params.toString())};window.__QC_SYSTEM_AGENTS__ = ${safeJson(initialAgents)};</script>`;
-    const full = doc.indexOf('<head>') >= 0
-      ? doc.replace('<head>', '<head>' + bridgeScript() + withParams)
+    const full = /<head\b[^>]*>/i.test(doc)
+      ? doc.replace(/<head\b[^>]*>/i, (m) => m + bridgeScript() + withParams)
       : bridgeScript() + withParams + doc;
     frame = document.createElement('iframe');
     frame.className = 'cr-embed-frame';
@@ -213,7 +220,8 @@ function renderStandalone(root) {
     setState('<i class="fa-solid fa-circle-notch spin"></i> در حال آماده‌سازی ابزار…');
     google.script.run
       .withSuccessHandler((html) => {
-        if (reportCacheToken !== token || !window.QCAuth || window.QCAuth.token !== token) return;
+        const curToken = (window.QCAuth && window.QCAuth.token) || '';
+        if (reportCacheToken !== token || curToken !== token) return;
         reportHtmlPending = false;
         if (!html) { fallback('نسخه‌ی مستقر، تابع گزارش تماس را ندارد؛ Code.gs جدید را جای‌گذاری کنید'); return; }
         reportHtmlCache = html;

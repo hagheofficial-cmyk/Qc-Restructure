@@ -176,6 +176,22 @@ function cleanText(val) {
   if (val === undefined || val === null) return '';
   return String(val).replace(/["']/g, '').trim();
 }
+function cleanOptionalText(val) {
+  if (val === undefined || val === null) return '';
+  let s = String(val).trim();
+  while (s.length >= 2 && ((s[0] === '"' && s[s.length - 1] === '"') || (s[0] === "'" && s[s.length - 1] === "'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  if (!s || /^(-|—|–|null|none|n\/a|nan)$/i.test(s)) return '';
+  return s;
+}
+function normHeader(k) {
+  return String(k == null ? '' : k)
+    .replace(/[\u200c\u200b\u00a0]/g, ' ')
+    .replace(/ي/g, 'ی').replace(/ك/g, 'ک')
+    .trim().toLowerCase()
+    .replace(/[\s_.\-]+/g, ' ');
+}
 
 /* ---------- تبدیل هر نوع تاریخ به اجزای جلالی ---------- */
 /* ورودی: عدد اکسل (میلادی، مثل 46259.49)، رشته ISO/میلادی، رشته شمسی '1405/06/03'
@@ -193,6 +209,59 @@ function findKey(row, candidates) {
     if (key != null) return key;
   }
   return null;
+}
+
+/* پیدا کردن ستون‌های علت ردلاین با هر سبک نام‌گذاری در اکسل‌های متابیس/دستی
+ * (مثل redline_reason، Red_line_Reason، redline reason، RED LINE REASON، علت ردلاین، redline_reason_1 و ...) */
+function findRedlineReason(row) {
+  const keys = Object.keys(row || {});
+  const exact = [
+    'redline reason', 'red line reason', 'redline reasons', 'red line reasons',
+    'redline text', 'red line text', 'redline comment', 'red line comment',
+    'redline description', 'red line description', 'redline detail', 'red line detail',
+    'علت ردلاین', 'دلیل ردلاین', 'توضیحات ردلاین', 'توضیح ردلاین', 'شرح ردلاین', 'متن ردلاین', 'علت خط قرمز'
+  ];
+  const matched = [];
+  const pushKey = (k) => { if (k != null && !matched.includes(k)) matched.push(k); };
+  for (const cand of exact) {
+    for (const k of keys) {
+      if (normHeader(k) === cand) pushKey(k);
+    }
+  }
+  for (const k of keys) {
+    const nh = normHeader(k);
+    const isRedlineCol = /(?:red ?line|ردلاین|خط قرمز)/.test(nh);
+    const hasReasonWord = /(?:reason|desc|detail|text|comment|note|علت|دلیل|شرح|توضیح|متن)/.test(nh);
+    if (isRedlineCol && hasReasonWord) pushKey(k);
+  }
+  const values = [];
+  for (const k of matched) {
+    const v = cleanOptionalText(row[k]);
+    if (v && !values.includes(v)) values.push(v);
+  }
+  return values.join(' — ');
+}
+
+function findQcComment(row) {
+  const keys = Object.keys(row || {});
+  const exact = [
+    'qc comment', 'qc comments', 'کامنت qc', 'توضیحات qc', 'توضیح qc', 'یادداشت qc',
+    'کامنت', 'توضیحات کارشناس qc', 'comment', 'comments'
+  ];
+  const matched = [];
+  const pushKey = (k) => { if (k != null && !matched.includes(k)) matched.push(k); };
+  for (const cand of exact) {
+    for (const k of keys) {
+      const nh = normHeader(k);
+      if (nh === cand || nh.replace(/\s+\d+$/, '') === cand) pushKey(k);
+    }
+  }
+  const values = [];
+  for (const k of matched) {
+    const v = cleanOptionalText(row[k]);
+    if (v && !values.includes(v)) values.push(v);
+  }
+  return values.join(' — ');
 }
 
 /* ---------- پارس ردیف‌های یک فرم (دقیقاً منطق پنل به‌علاوه‌ی تبدیل تاریخ) ---------- */
@@ -216,7 +285,6 @@ function parseRows(rows, type, options) {
     const redlineKey = ['redline', 'red_line', 'red line']
       .map((cand) => findKey(r, [cand]))
       .find((k) => k != null && cleanText(r[k]) !== '') || findKey(r, ['redline', 'red_line', 'red line']);
-    const redlineReasonKey = findKey(r, ['redline_reason', 'red_line_reason', 'red line reason', 'علت ردلاین', 'علت خط قرمز']);
     const lsKey = findKey(r, ['listening_duration', 'listening duration', 'listening time (second)', 'listening_time_(second)', 'listening_time_second', 'listening_time']);
     // تاریخ بررسیِ غیرخالی ولی نامعتبر را با تاریخ تماس جایگزین نکنیم.
     const reviewKey = dt.slice(0, -2).map((key) => findKey(r, [key])).find((key) => key != null && cleanText(r[key]) !== '');
@@ -225,13 +293,13 @@ function parseRows(rows, type, options) {
     const qcKey = findKey(r, ['qc_expert_name', 'qc_agent', 'qcagent']);
     const leadKey = findKey(r, ['lead_name', 'lead name']);
     const phoneKey = findKey(r, ['lead_phone', 'lead phone']);
-    const commentKey = findKey(r, ['qc_comment', 'qc comment', 'کامنت']);
     const durationKey = findKey(r, ['call_duration', 'call duration', 'call_duration_second', 'call_duration (second)', 'conversation_time', 'talk_time', 'مدت مکالمه', 'تایم مکالمه']);
     const idKey = findKey(r, ['evaluation_id', 'form_id', 'call_id']);
 
     const score = C.normalizeScore(scoreKey ? r[scoreKey] : null);
     const redline = isRedline(redlineKey ? r[redlineKey] : null) ? 1 : 0;
-    const redlineReason = redlineReasonKey ? cleanText(r[redlineReasonKey]) : '';
+    const redlineReason = findRedlineReason(r);
+    const qcComment = findQcComment(r);
 
     const teamColumn = findKey(r, ['team', 'team_name', 'تیم']);
     const colTeam = teamColumn ? cleanText(r[teamColumn]) : '';
@@ -260,7 +328,7 @@ function parseRows(rows, type, options) {
       listeningTime: lsKey ? cleanText(r[lsKey]) || '-' : '-',
       callDuration: durationKey ? cleanText(r[durationKey]) : '',
       qcAgent: qcKey ? normName(cleanText(r[qcKey])) : '',
-      qcComment: commentKey ? cleanText(r[commentKey]) : '',
+      qcComment,
       reviewDate: dateKey ? cleanQcDate(r[dateKey]) : '',
       callDate: actionDateKey ? cleanQcDate(r[actionDateKey]) : '',
       sourceRow: index + 2,
@@ -760,6 +828,7 @@ function importDiagnostics(rows, agents) {
 return {
   clearResolveCache: clearResolveCache,
   PARSER_VERSION: 4, anyToJalali, cleanQcDate, parseRows, parseSituationalRows,
+  findRedlineReason, findQcComment,
   isSituationalFile, classifyCallFile, situationalRowKey, dateRangeOfCalls,
   classifyMonthlyScoreFile, parseMonthlyScoreRows, monthlyScoreRowKey,
   formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey,
