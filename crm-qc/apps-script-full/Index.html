@@ -799,9 +799,16 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 .profile-toolbar .field label { font-size:10px; } .profile-toolbar .input { width:140px; }
 .profile-toolbar .toolbar-actions { margin-inline-start:auto;display:flex;gap:8px;flex-wrap:wrap; }
 .profile-content { padding:20px;background:var(--bg);min-width:0; }
-.profile-summary { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px; }
-.profile-summary .summary-block { padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px; }
-.profile-summary small { color:var(--muted);font-size:10px; } .profile-summary strong { display:block;font-size:21px; }
+.profile-summary { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px; }
+.profile-summary .summary-block { padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;gap:5px;min-width:0; }
+.profile-summary .summary-block.kpi-primary { border-color:var(--brand);background:linear-gradient(135deg,var(--brand-soft),var(--panel)); }
+.profile-summary .summary-block.kpi-warn { border-color:rgba(251,191,36,.45); }
+.profile-summary .summary-block.kpi-danger { border-color:rgba(248,113,113,.45); }
+.profile-summary .summary-head { display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ink-2); }
+.profile-summary .summary-head i { color:var(--brand);font-size:13px;flex-shrink:0; }
+.profile-summary .summary-block.kpi-primary .summary-head { color:var(--brand); }
+.profile-summary small, .profile-summary .summary-sub { color:var(--muted);font-size:10px;line-height:1.55; }
+.profile-summary strong { display:block;font-size:22px;font-weight:800;line-height:1.2; }
 .profile-period { color:var(--brand);font-weight:700; }
 .profile-image-note { font-size:11px;color:var(--muted);padding:14px;border:1px dashed var(--line);border-radius:12px;margin-top:14px; }
 .capture-host { position:absolute;left:0;top:0;width:1600px;z-index:-10;pointer-events:none;background:var(--bg);padding:28px; }
@@ -842,6 +849,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
   .global-range { top:var(--topbar-h);gap:10px; }
   .range-title { flex-basis:100%; }.range-state { margin-inline-start:auto; }
   .criteria-layout { grid-template-columns:1fr; }.criteria-team-list { display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .profile-summary { grid-template-columns:repeat(3,minmax(0,1fr)); }
 }
 @media(max-width:700px) {
   .global-range { position:relative;top:0;padding:13px; }
@@ -1372,9 +1380,10 @@ body.auth-locked #app { filter: blur(2px); pointer-events: none; }
 .profile-content { padding:14px; }
 .profile-content .profile-identity { margin-bottom:10px !important; }
 .profile-content .profile-identity .card-pad { padding:12px 15px; gap:10px !important; }
-.profile-summary { gap:8px; margin-bottom:10px; }
-.profile-summary .summary-block { padding:9px 12px; }
-.profile-summary strong { font-size:18px; }
+.profile-summary { gap:8px; margin-bottom:12px; }
+.profile-summary .summary-block { padding:11px 12px; }
+.profile-summary strong { font-size:20px; }
+.capture-host .profile-summary { grid-template-columns:repeat(5,minmax(0,1fr)) !important; }
 .profile-content .profile-source-kpis { gap:10px; margin-bottom:10px !important; }
 .profile-content .profile-source-kpis .card-pad { padding:10px 14px; }
 .profile-content .card-head { padding:11px 14px; }
@@ -1912,10 +1921,26 @@ table.profile-call-table { width:100%; min-width:0; table-layout:fixed; font-siz
     }
     var m = s.match(/^(\d{4})[\/._-](\d{1,2})[\/._-](\d{1,2})(?:[T\s].*)?$/);
     if (!m && /^\d{8}$/.test(s)) m = [s, s.slice(0, 4), s.slice(4, 6), s.slice(6, 8)];
-    if (!m) return null;
-    var y = +m[1], month = +m[2], day = +m[3];
-    if (y >= 1700) return gregorian(y, month, day);
-    return parseJalali({ jy: y, jm: month, jd: day });
+    if (m) {
+      var y = +m[1], month = +m[2], day = +m[3];
+      if (y >= 1700) return gregorian(y, month, day);
+      return parseJalali({ jy: y, jm: month, jd: day });
+    }
+    // تاریخ انگلیسی با نام ماه (مثل خروجی متنی/CSV متابیس: "November 12, 2026, 8:17 PM" یا "12 Nov 2026")
+    var EN_MONTHS = {
+      jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+      may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+      sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12
+    };
+    var em1 = s.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})(?:[,\s].*)?$/);
+    if (em1 && EN_MONTHS[em1[1].toLowerCase()]) {
+      return gregorian(+em1[3], EN_MONTHS[em1[1].toLowerCase()], +em1[2]);
+    }
+    var em2 = s.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})(?:[,\s].*)?$/);
+    if (em2 && EN_MONTHS[em2[2].toLowerCase()]) {
+      return gregorian(+em2[3], EN_MONTHS[em2[2].toLowerCase()], +em2[1]);
+    }
+    return null;
   }
 
   function normalizeScore(value) {
@@ -3596,6 +3621,10 @@ window.QC_SEED = {"version":2,"agents":[{"id":1,"ext":3073,"name":"مبینا س
     var effT = effectiveChannelScore(T, mT);
     var effS = effectiveChannelScore(S, mS);
     var Ph = filterCalls(data, Object.assign({}, q, { agent: name }));
+    var allPh = (q && (q.from || q.to))
+      ? filterCalls(data, Object.assign({}, q, { agent: name, from: '', to: '' }))
+      : Ph;
+    var allCallRange = P.dateRangeOfCalls ? P.dateRangeOfCalls(allPh) : { from: '', to: '' };
     var Sit = filterSituational(data, Object.assign({}, q, { agent: name }));
     var sitAgg = aggregateSituational(Sit);
     var callAvgVal = avgScore(Ph);
@@ -3661,6 +3690,8 @@ window.QC_SEED = {"version":2,"agents":[{"id":1,"ext":3073,"name":"مبینا س
       },
       calls: {
         rows: Ph, count: Ph.length,
+        allCount: allPh.length,
+        allDateRange: allCallRange,
         byType: ['tele', 'account', 'mlm'].map(function (t) {
           var rs = callsByForm[t];
           return { type: t, count: rs.length, avg: avgScore(rs) };
@@ -12742,6 +12773,21 @@ async function render(root, arg) {
       ? Ph.byType.map(t => `<span class="tag-team">${FORM_TYPE_FA[t.type] || t.type}: ${fa(t.count)} تماس · میانگین ${t.avg === '' ? '—' : scorePill(t.avg)}</span>`).join(' ')
       : '<span class="tag-team" style="opacity:.5">دیتای ریت تماس برای این کارشناس یافت نشد</span>';
 
+    const socialRedlines = S.rows.filter(r => QCReports.hasRedline(r, 'social')).length;
+    const totalRedlines = (T.redlineZero || 0) + socialRedlines + (Ph.redlineCount || 0);
+    const hiddenCalls = (Ph.allCount || 0) > (Ph.count || 0) ? (Ph.allCount - Ph.count) : 0;
+    const allRange = Ph.allDateRange || { from: '', to: '' };
+    const dateCoverageHtml = hiddenCalls > 0 ? `
+      <div class="alert warn" id="pDateCoverageAlert" style="margin-bottom:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <i class="fa-solid fa-calendar-exclamation"></i>
+        <span style="flex:1;min-width:220px">از مجموع <b>${fa(Ph.allCount)}</b> ریت تماس این کارشناس${allRange.from || allRange.to ? ` (بازه <b>${fa(allRange.from || '—')}</b> تا <b>${fa(allRange.to || '—')}</b>)` : ''}، در بازه فیلتر فعلی <b>${fa(Ph.count)}</b> تماس نمایش داده می‌شود (<b>${fa(hiddenCalls)}</b> تماس خارج از این بازه است).</span>
+        ${(allRange.from || allRange.to) ? `<button type="button" class="btn soft" id="pFitAgentRange" style="padding:5px 10px;font-size:11px"><i class="fa-solid fa-expand"></i> تنظیم روی بازه کامل کارشناس</button>` : ''}
+      </div>` : '';
+
+    const fmtVal = (v) => (v === '' || v == null ? '—' : fa(v));
+    const sitPeriodTxt = (Sit.periods && Sit.periods[0] && (Sit.periods[0].from || Sit.periods[0].to))
+      ? ` · ${fa(Sit.periods[0].from || '—')} تا ${fa(Sit.periods[0].to || '—')}` : '';
+
     body.innerHTML = `
       <div class="capture-title no-capture"></div>
       <div class="profile-system-brand"><img src="${esc(window.APP_SCRIPT_MODE && window.APP_SCRIPT_LOGO_DATA ? window.APP_SCRIPT_LOGO_DATA : 'logo.png')}" width="30" height="30" alt="لوگوی سامانه"><span>سامانه کنترل کیفیت CRM · گزارش عملکرد</span></div>
@@ -12758,33 +12804,47 @@ async function render(root, arg) {
               ${a.id === 0 ? '<span class="badge warn">در فایل‌های واردشده؛ در مدیریت کارشناسان ثبت نشده</span>' : ''}
               ${a.ext != null ? `<span class="badge gray"><i class="fa-solid fa-hashtag"></i> داخلی ${fa(a.ext)}</span>` : ''}
               <span class="badge ${a.active ? 'ok' : 'bad'}">${a.active ? 'فعال' : 'بایگانی'}</span>
+              <span class="badge gray"><i class="fa-solid fa-layer-group"></i> کل ریت‌ها: ${fa(T.count + S.count + Ph.count)}</span>
+              <span class="badge ${totalRedlines > 0 ? 'bad' : 'gray'}"><i class="fa-solid fa-ban"></i> ردلاین: ${fa(T.redlineZero)} / ${fa(socialRedlines)} / ${fa(Ph.redlineCount)}</span>
               ${monthLine}
             </div>
           </div>
         </div>
       </div>
 
-      <div class="profile-summary">
-        <div class="summary-block"><small>نمره کل وزن‌دار${d.weighted && d.weighted.activeWeight && d.weighted.activeWeight < 100 ? ` (${fa(d.weighted.activeWeight)}٪ وزن فعال)` : ''}</small><strong>${d.weighted && d.weighted.score !== '' ? fa(d.weighted.score) : '—'}</strong></div>
-        <div class="summary-block"><small>نمره المان‌های ثابت تماس (۴۵٪)</small><strong>${Ph.avgScore===''?'—':fa(Ph.avgScore)}</strong></div>
-        ${Sit.hasData ? `<div class="summary-block"><small>نمره المان‌های موقعیتی (۲۵٪)</small><strong>${Sit.avgScore===''?'—':fa(Sit.avgScore)}</strong></div>` : ''}
-        <div class="summary-block"><small>تعداد کل ریت‌ها</small><strong>${fa(T.count+S.count+Ph.count)}</strong></div>
-        <div class="summary-block"><small>ردلاین‌ها؛ تیکت / سوشال / تماس</small><strong>${fa(T.redlineZero)} / ${fa(S.rows.filter(r=>QCReports.hasRedline(r,'social')).length)} / ${fa(Ph.redlineCount)}</strong></div></div>
+      ${dateCoverageHtml}
+
+      <!-- ۵ باکس اصلی نمره کنار هم در ابتدای پروفایل کارشناس به ترتیب رسمی -->
+      <div class="profile-summary" id="pTopKpis">
+        <div class="summary-block kpi-primary" data-kpi="overall">
+          <div class="summary-head"><i class="fa-solid fa-scale-balanced"></i><span>نمره کل</span></div>
+          <strong>${fmtVal(d.weighted && d.weighted.score)}</strong>
+          <small class="summary-sub">مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی${d.weighted && d.weighted.activeWeight ? ` · ${d.weighted.activeWeight < 100 ? `وزن فعال ${fa(d.weighted.activeWeight)}٪` : '۱۰۰٪ کامل'}` : ''}</small>
+        </div>
+        <div class="summary-block ${Ph.redlineCount > 0 ? 'kpi-danger' : ''}" data-kpi="fixed">
+          <div class="summary-head"><i class="fa-solid fa-headset"></i><span>نمره المان‌های ثابت</span></div>
+          <strong>${fmtVal(Ph.avgScore)}</strong>
+          <small class="summary-sub">ضریب ۴۵٪ · ${fa(Ph.count)} تماس${Ph.redlineCount ? ` · ردلاین ${fa(Ph.redlineCount)}` : ''}</small>
+        </div>
+        <div class="summary-block" data-kpi="situational">
+          <div class="summary-head"><i class="fa-solid fa-sliders"></i><span>نمره المان‌های موقعیتی</span></div>
+          <strong>${Sit.hasData ? fmtVal(Sit.avgScore) : '—'}</strong>
+          <small class="summary-sub">ضریب ۲۵٪ · ${Sit.hasData ? `${fa(Sit.formsCount || 0)} فرم${sitPeriodTxt}` : 'بدون داده'}</small>
+        </div>
+        <div class="summary-block ${T.redlineZero > 0 ? 'kpi-warn' : ''}" data-kpi="ticket">
+          <div class="summary-head"><i class="fa-solid fa-ticket"></i><span>نمره تیکت</span></div>
+          <strong>${fmtVal(T.avgScore)}</strong>
+          <small class="summary-sub">ضریب ۱۵٪ · ${fa(T.count)} ارزیابی${T.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${T.redlineZero ? ` · ردلاین ${fa(T.redlineZero)}` : ''}</small>
+        </div>
+        <div class="summary-block ${S.slaReal !== '' && S.slaReal < 70 ? 'kpi-warn' : ''}" data-kpi="social">
+          <div class="summary-head"><i class="fa-solid fa-comments"></i><span>نمره سوشال</span></div>
+          <strong>${fmtVal(S.avgScore)}</strong>
+          <small class="summary-sub">ضریب ۱۵٪ · ${fa(S.count)} ارزیابی${S.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${S.slaReal === '' ? '' : ` · SLA ${fa(S.slaReal)}٪`}${S.unanswered ? ` · عدم پاسخ ${fa(S.unanswered)}` : ''}</small>
+        </div>
+      </div>
 
       ${weightedCard(d)}
       ${scorecard(d)}
-      <div class="grid profile-source-kpis" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin-bottom:16px">
-        ${kpi('fa-ticket', 'ارزیابی تیکت (۱۵٪)', T.avgScore === '' ? fa(T.count) : `${fa(T.avgScore)}`,
-          `${T.source === 'monthly_excel' ? '<span class="badge blue" style="font-size:10px">اکسل ماهانه</span> · ' : ''}${fa(T.count)} ارزیابی`, T.redlineZero > 0 ? 'warn' : '')}
-        ${kpi('fa-comments', 'پیام‌رسان / سوشال (۱۵٪)', S.avgScore === '' ? fa(S.count) : `${fa(S.avgScore)}`,
-          `${S.source === 'monthly_excel' ? '<span class="badge blue" style="font-size:10px">اکسل ماهانه</span> · ' : ''}${fa(S.count)} ارزیابی${S.slaReal === '' ? '' : ' · SLA ' + fa(S.slaReal) + '٪'}${S.unanswered ? ' · عدم پاسخ ' + fa(S.unanswered) : ''}`,
-          S.slaReal !== '' && S.slaReal < 70 ? 'warn' : '')}
-        ${kpi('fa-headset', 'المان‌های ثابت تماس (۴۵٪)', Ph.avgScore === '' ? fa(Ph.count) : fa(Ph.avgScore),
-          `${fa(Ph.count)} تماس${Ph.redlineCount ? ' · ردلاین ' + fa(Ph.redlineCount) : ''}`,
-          Ph.redlineCount > 0 ? 'danger' : '')}
-        ${Sit.hasData ? kpi('fa-sliders', 'المان‌های موقعیتی (۲۵٪)', Sit.avgScore === '' ? '—' : fa(Sit.avgScore),
-          `${fa(Sit.formsCount || 0)} فرم${(Sit.periods && Sit.periods[0] && (Sit.periods[0].from || Sit.periods[0].to)) ? ' · ' + fa(Sit.periods[0].from || '—') + ' تا ' + fa(Sit.periods[0].to || '—') : ''}`, '') : ''}
-      </div>
 
       ${criteriaCard(Ph.byTypeRates)}
       ${situationalCard(Sit)}
@@ -12838,6 +12898,10 @@ async function render(root, arg) {
       </div>` : ''}`;
 
     body.insertAdjacentHTML('beforeend', `<div class="profile-image-note">گزارش عملکرد ${esc(a.name)} · ${esc(periodLabel)}<br>مبنا: تاریخ بررسی هر ریت. نمره‌ی خالی صفر نیست؛ میانگین بر نمره‌های معتبر وزن‌دار است. 1 = رعایت، 0 = عدم رعایت، - = موضوعیت نداشته و خارج از مخرج نرخ؛ — = ثبت‌نشده. اقدام‌ها جدا از بازه‌ی ارزیابی‌اند.</div>`);
+    const fitBtn = $('#pFitAgentRange', body);
+    if (fitBtn && (allRange.from || allRange.to)) {
+      fitBtn.addEventListener('click', () => App.setDateRange({ from: allRange.from || '', to: allRange.to || '' }));
+    }
     bindCallRedlines($('#pCallHistory', body) || body, historyCalls);
     if (d.actions.length || true) {
       const wrap = $('#pActionsWrap');

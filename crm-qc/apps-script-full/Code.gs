@@ -191,10 +191,26 @@ URLSearchParams.prototype.forEach = function (callback, context) {
     }
     var m = s.match(/^(\d{4})[\/._-](\d{1,2})[\/._-](\d{1,2})(?:[T\s].*)?$/);
     if (!m && /^\d{8}$/.test(s)) m = [s, s.slice(0, 4), s.slice(4, 6), s.slice(6, 8)];
-    if (!m) return null;
-    var y = +m[1], month = +m[2], day = +m[3];
-    if (y >= 1700) return gregorian(y, month, day);
-    return parseJalali({ jy: y, jm: month, jd: day });
+    if (m) {
+      var y = +m[1], month = +m[2], day = +m[3];
+      if (y >= 1700) return gregorian(y, month, day);
+      return parseJalali({ jy: y, jm: month, jd: day });
+    }
+    // تاریخ انگلیسی با نام ماه (مثل خروجی متنی/CSV متابیس: "November 12, 2026, 8:17 PM" یا "12 Nov 2026")
+    var EN_MONTHS = {
+      jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+      may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+      sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12
+    };
+    var em1 = s.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})(?:[,\s].*)?$/);
+    if (em1 && EN_MONTHS[em1[1].toLowerCase()]) {
+      return gregorian(+em1[3], EN_MONTHS[em1[1].toLowerCase()], +em1[2]);
+    }
+    var em2 = s.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})(?:[,\s].*)?$/);
+    if (em2 && EN_MONTHS[em2[2].toLowerCase()]) {
+      return gregorian(+em2[3], EN_MONTHS[em2[2].toLowerCase()], +em2[1]);
+    }
+    return null;
   }
 
   function normalizeScore(value) {
@@ -1866,6 +1882,10 @@ return {
     var effT = effectiveChannelScore(T, mT);
     var effS = effectiveChannelScore(S, mS);
     var Ph = filterCalls(data, Object.assign({}, q, { agent: name }));
+    var allPh = (q && (q.from || q.to))
+      ? filterCalls(data, Object.assign({}, q, { agent: name, from: '', to: '' }))
+      : Ph;
+    var allCallRange = P.dateRangeOfCalls ? P.dateRangeOfCalls(allPh) : { from: '', to: '' };
     var Sit = filterSituational(data, Object.assign({}, q, { agent: name }));
     var sitAgg = aggregateSituational(Sit);
     var callAvgVal = avgScore(Ph);
@@ -1931,6 +1951,8 @@ return {
       },
       calls: {
         rows: Ph, count: Ph.length,
+        allCount: allPh.length,
+        allDateRange: allCallRange,
         byType: ['tele', 'account', 'mlm'].map(function (t) {
           var rs = callsByForm[t];
           return { type: t, count: rs.length, avg: avgScore(rs) };
@@ -6417,6 +6439,7 @@ function gridRows_(sheet) {
  */
 function readDatabase_(ss, wanted, info) {
   var sheets = sheetMap_(ss);
+  var sheetTz = spreadsheetTimeZone_(ss);
   var keys = wanted && wanted.length ? wanted : null; // null = همه‌ی تب‌ها
   var need = function (key) { return !keys || keys.indexOf(key) >= 0; };
   var cached = {};
@@ -6431,14 +6454,14 @@ function readDatabase_(ss, wanted, info) {
     return value;
   }
   function rows(sheetName) {
-    return readRowsGrid_(gridValues_(sheets[sheetName]));
+    return readRowsGrid_(gridValues_(sheets[sheetName]), sheetTz);
   }
 
-  var meta = raw('meta', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.meta])); }) || {};
-  var settings = raw('settings', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.settings])); }) || {};
-  var lists = raw('lists', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.lists])); }) || {};
-  var criteria = raw('criteria', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.criteria])); }) || {};
-  var callMeta = raw('callMeta', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.callMeta])); }) || {};
+  var meta = raw('meta', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.meta]), sheetTz); }) || {};
+  var settings = raw('settings', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.settings]), sheetTz); }) || {};
+  var lists = raw('lists', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.lists]), sheetTz); }) || {};
+  var criteria = raw('criteria', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.criteria]), sheetTz); }) || {};
+  var callMeta = raw('callMeta', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.callMeta]), sheetTz); }) || {};
 
   var agentActions = raw('agentActions', function () {
     var map = {};
@@ -6522,7 +6545,7 @@ function readDatabase_(ss, wanted, info) {
   return db;
 }
 
-function readRowsGrid_(grid) {
+function readRowsGrid_(grid, tz) {
   if (!grid || grid.length < 2) return [];
   var headers = grid[0].map(function (header) { return String(header == null ? '' : header).trim(); });
   var out = [];
@@ -6531,7 +6554,7 @@ function readRowsGrid_(grid) {
     for (var c = 0; c < headers.length; c++) {
       var key = headers[c];
       if (!key) continue;
-      var value = decodeCell_(grid[r][c], key);
+      var value = decodeCell_(grid[r][c], key, tz);
       if (value !== '' && value != null) populated = true;
       row[key] = value;
     }
@@ -6540,13 +6563,13 @@ function readRowsGrid_(grid) {
   return out;
 }
 
-function readKeyValueGrid_(grid) {
+function readKeyValueGrid_(grid, tz) {
   var out = {};
   if (!grid || grid.length < 2) return out;
   for (var i = 1; i < grid.length; i++) {
     var key = String(grid[i][0] == null ? '' : grid[i][0]).trim();
     if (!key) continue;
-    out[key] = decodeCell_(grid[i][1], key);
+    out[key] = decodeCell_(grid[i][1], key, tz);
   }
   return out;
 }
@@ -6913,6 +6936,8 @@ function fullRewrite_(sheet, keys, values) {
   if (!keys.length) keys = ['id'];
   var grid = [keys].concat(values.map(function (row) { return row.slice(0, keys.length); }));
   sheet.clearContents();
+  var maxR = typeof sheet.getMaxRows === 'function' ? Math.max(sheet.getMaxRows() - 1, values.length, 1) : Math.max(values.length, 1);
+  formatTextDateColumns_(sheet, keys, 2, maxR);
   sheet.getRange(1, 1, grid.length, keys.length).setValues(grid);
   if (values.length === 0) styleHeader_(sheet, keys.length);
 }
@@ -7001,6 +7026,8 @@ function ensureHeader_(sheet, headers) {
   if (gridRows_(sheet) < 1 || sheet.getLastColumn() < 1) {
     sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
     styleHeader_(sheet, headers.length);
+    var maxR = typeof sheet.getMaxRows === 'function' ? Math.max(sheet.getMaxRows() - 1, 1) : 1000;
+    formatTextDateColumns_(sheet, headers, 2, maxR);
   } else {
     sheet.setFrozenRows(1);
   }
@@ -7014,6 +7041,32 @@ function styleHeader_(sheet, width) {
     .setFontColor('#ffffff');
 }
 
+var QC_GAS_TEXT_DATE_KEYS = {
+  reviewDate: 1, callDate: 1, ticketDate: 1, receiveDate: 1, replyDate: 1,
+  periodFrom: 1, periodTo: 1, date: 1, from: 1, to: 1
+};
+
+function spreadsheetTimeZone_(ss) {
+  try {
+    if (ss && typeof ss.getSpreadsheetTimeZone === 'function') {
+      var tz = ss.getSpreadsheetTimeZone();
+      if (tz) return tz;
+    }
+  } catch (ignored) {}
+  try { return Session.getScriptTimeZone(); } catch (ignored) { return 'Asia/Tehran'; }
+}
+
+function formatTextDateColumns_(sheet, keys, startRow, numRows) {
+  if (!sheet || !keys || !keys.length || !numRows || numRows < 1) return;
+  for (var c = 0; c < keys.length; c++) {
+    if (!QC_GAS_TEXT_DATE_KEYS[keys[c]]) continue;
+    try {
+      var rng = sheet.getRange(startRow, c + 1, numRows, 1);
+      if (rng && typeof rng.setNumberFormat === 'function') rng.setNumberFormat('@');
+    } catch (ignored) {}
+  }
+}
+
 function encodeCell_(value, key) {
   /* ستون qcAgents باید روی شیت خوانا و دست‌نویس‌شدنی باشد: نام‌ها با جداکننده، نه JSON. */
   if (key === 'qcAgents' && Array.isArray(value)) return value.join('، ');
@@ -7023,11 +7076,18 @@ function encodeCell_(value, key) {
   return value;
 }
 
-function decodeCell_(value, key) {
+function decodeCell_(value, key, tz) {
   if (value == null || value === '') return '';
   if (value instanceof Date) {
-    try { return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'); }
-    catch (ignored) { return value.toISOString(); }
+    try {
+      var useTz = tz || (typeof Session !== 'undefined' && Session.getScriptTimeZone ? Session.getScriptTimeZone() : 'UTC');
+      var formatted = Utilities.formatDate(value, useTz, 'yyyy-MM-dd HH:mm:ss');
+      var ym = formatted.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (ym && Number(ym[1]) >= 1300 && Number(ym[1]) <= 1599) {
+        return ym[1] + '/' + ym[2] + '/' + ym[3];
+      }
+      return formatted;
+    } catch (ignored) { return value.toISOString(); }
   }
   if (typeof value === 'string') {
     var text = value.trim();

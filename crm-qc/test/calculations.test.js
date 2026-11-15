@@ -13,8 +13,11 @@ const DAY = { from: '1405/06/20', to: '1405/06/20' };
 test('dates: Jalali/Persian/Arabic/ISO/Excel all identify the same review day', () => {
   const dates = ['1405/6/20', '۱۴۰۵/۰۶/۲۰', '١٤٠٥/٠٦/٢٠', '14050620', 14050620,
     '2026-09-11', '2026/09/11', '20260911', '"2026-09-11 17:00:00"',
-    '2026-09-11T23:50:00-07:00', 46276.67769675926, '46276.67769675926', new Date('2026-09-11T00:00:00Z')];
+    '2026-09-11T23:50:00-07:00', 46276.67769675926, '46276.67769675926', new Date('2026-09-11T00:00:00Z'),
+    'September 11, 2026, 8:17 PM', 'Sep 11, 2026', '11 Sep 2026', '11 September 2026'];
   for (const date of dates) assert.equal(C.formatJalali(P.anyToJalali(date)), '1405/06/20', String(date));
+  assert.equal(C.formatJalali(C.parseDate('November 12, 2026, 8:17 PM')), '1405/08/21');
+  assert.equal(C.formatJalali(C.parseDate('Oct 18, 2026')), '1405/07/26');
   for (const date of ['', null, '-', 'نامشخص', '1405/13/01', '1405/12/30', '2026-02-30', '2026-13-01', 'junk']) {
     assert.equal(C.parseDate(date), null, String(date));
   }

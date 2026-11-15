@@ -679,6 +679,10 @@
     var effT = effectiveChannelScore(T, mT);
     var effS = effectiveChannelScore(S, mS);
     var Ph = filterCalls(data, Object.assign({}, q, { agent: name }));
+    var allPh = (q && (q.from || q.to))
+      ? filterCalls(data, Object.assign({}, q, { agent: name, from: '', to: '' }))
+      : Ph;
+    var allCallRange = P.dateRangeOfCalls ? P.dateRangeOfCalls(allPh) : { from: '', to: '' };
     var Sit = filterSituational(data, Object.assign({}, q, { agent: name }));
     var sitAgg = aggregateSituational(Sit);
     var callAvgVal = avgScore(Ph);
@@ -744,6 +748,8 @@
       },
       calls: {
         rows: Ph, count: Ph.length,
+        allCount: allPh.length,
+        allDateRange: allCallRange,
         byType: ['tele', 'account', 'mlm'].map(function (t) {
           var rs = callsByForm[t];
           return { type: t, count: rs.length, avg: avgScore(rs) };

@@ -59,9 +59,16 @@
 .profile-toolbar .field label { font-size:10px; } .profile-toolbar .input { width:140px; }
 .profile-toolbar .toolbar-actions { margin-inline-start:auto;display:flex;gap:8px;flex-wrap:wrap; }
 .profile-content { padding:20px;background:var(--bg);min-width:0; }
-.profile-summary { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px; }
-.profile-summary .summary-block { padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px; }
-.profile-summary small { color:var(--muted);font-size:10px; } .profile-summary strong { display:block;font-size:21px; }
+.profile-summary { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:16px; }
+.profile-summary .summary-block { padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:12px;display:flex;flex-direction:column;gap:5px;min-width:0; }
+.profile-summary .summary-block.kpi-primary { border-color:var(--brand);background:linear-gradient(135deg,var(--brand-soft),var(--panel)); }
+.profile-summary .summary-block.kpi-warn { border-color:rgba(251,191,36,.45); }
+.profile-summary .summary-block.kpi-danger { border-color:rgba(248,113,113,.45); }
+.profile-summary .summary-head { display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--ink-2); }
+.profile-summary .summary-head i { color:var(--brand);font-size:13px;flex-shrink:0; }
+.profile-summary .summary-block.kpi-primary .summary-head { color:var(--brand); }
+.profile-summary small, .profile-summary .summary-sub { color:var(--muted);font-size:10px;line-height:1.55; }
+.profile-summary strong { display:block;font-size:22px;font-weight:800;line-height:1.2; }
 .profile-period { color:var(--brand);font-weight:700; }
 .profile-image-note { font-size:11px;color:var(--muted);padding:14px;border:1px dashed var(--line);border-radius:12px;margin-top:14px; }
 .capture-host { position:absolute;left:0;top:0;width:1600px;z-index:-10;pointer-events:none;background:var(--bg);padding:28px; }
@@ -102,6 +109,7 @@
   .global-range { top:var(--topbar-h);gap:10px; }
   .range-title { flex-basis:100%; }.range-state { margin-inline-start:auto; }
   .criteria-layout { grid-template-columns:1fr; }.criteria-team-list { display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .profile-summary { grid-template-columns:repeat(3,minmax(0,1fr)); }
 }
 @media(max-width:700px) {
   .global-range { position:relative;top:0;padding:13px; }
@@ -632,9 +640,10 @@ body.auth-locked #app { filter: blur(2px); pointer-events: none; }
 .profile-content { padding:14px; }
 .profile-content .profile-identity { margin-bottom:10px !important; }
 .profile-content .profile-identity .card-pad { padding:12px 15px; gap:10px !important; }
-.profile-summary { gap:8px; margin-bottom:10px; }
-.profile-summary .summary-block { padding:9px 12px; }
-.profile-summary strong { font-size:18px; }
+.profile-summary { gap:8px; margin-bottom:12px; }
+.profile-summary .summary-block { padding:11px 12px; }
+.profile-summary strong { font-size:20px; }
+.capture-host .profile-summary { grid-template-columns:repeat(5,minmax(0,1fr)) !important; }
 .profile-content .profile-source-kpis { gap:10px; margin-bottom:10px !important; }
 .profile-content .profile-source-kpis .card-pad { padding:10px 14px; }
 .profile-content .card-head { padding:11px 14px; }

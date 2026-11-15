@@ -165,10 +165,26 @@
     }
     var m = s.match(/^(\d{4})[\/._-](\d{1,2})[\/._-](\d{1,2})(?:[T\s].*)?$/);
     if (!m && /^\d{8}$/.test(s)) m = [s, s.slice(0, 4), s.slice(4, 6), s.slice(6, 8)];
-    if (!m) return null;
-    var y = +m[1], month = +m[2], day = +m[3];
-    if (y >= 1700) return gregorian(y, month, day);
-    return parseJalali({ jy: y, jm: month, jd: day });
+    if (m) {
+      var y = +m[1], month = +m[2], day = +m[3];
+      if (y >= 1700) return gregorian(y, month, day);
+      return parseJalali({ jy: y, jm: month, jd: day });
+    }
+    // تاریخ انگلیسی با نام ماه (مثل خروجی متنی/CSV متابیس: "November 12, 2026, 8:17 PM" یا "12 Nov 2026")
+    var EN_MONTHS = {
+      jan: 1, january: 1, feb: 2, february: 2, mar: 3, march: 3, apr: 4, april: 4,
+      may: 5, jun: 6, june: 6, jul: 7, july: 7, aug: 8, august: 8,
+      sep: 9, sept: 9, september: 9, oct: 10, october: 10, nov: 11, november: 11, dec: 12, december: 12
+    };
+    var em1 = s.match(/^([A-Za-z]{3,9})\.?\s+(\d{1,2}),?\s+(\d{4})(?:[,\s].*)?$/);
+    if (em1 && EN_MONTHS[em1[1].toLowerCase()]) {
+      return gregorian(+em1[3], EN_MONTHS[em1[1].toLowerCase()], +em1[2]);
+    }
+    var em2 = s.match(/^(\d{1,2})\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})(?:[,\s].*)?$/);
+    if (em2 && EN_MONTHS[em2[2].toLowerCase()]) {
+      return gregorian(+em2[3], EN_MONTHS[em2[2].toLowerCase()], +em2[1]);
+    }
+    return null;
   }
 
   function normalizeScore(value) {

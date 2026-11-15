@@ -8,6 +8,7 @@ const vm = require('node:vm');
 const { spawn } = require('node:child_process');
 const XLSX = require('xlsx');
 
+const C = require('../shared/calc');
 const P = require('../shared/parseQc');
 const R = require('../shared/reports');
 const I = require('../shared/importData');
@@ -765,3 +766,90 @@ test('Target team categorization, unlinked situational backfill, and UI per-file
   assert.ok(w.document.querySelectorAll('#tblWrap tbody tr').length >= 42, 'Call report must immediately display all uploaded specialists');
   assert.equal(env.errors.length, 0);
 });
+
+/* =========================================================================
+ * 10. 65-specialist full parity (42 Tele + 23 Account) & Specialist Profile
+ *     top 5 KPI strip order + date-coverage alert
+ * ========================================================================= */
+test('65-specialist Metabase parity (incl. سحر سامنی) and Specialist Profile top 5 KPI boxes order', async (t) => {
+  const db = makeSeedDb();
+  I.callFiles(db, [
+    { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+    { name: FILES.teleSit, rows: readSampleRows('teleSit') },
+    { name: FILES.accFixed, rows: readSampleRows('accFixed') },
+    { name: FILES.accSit, rows: readSampleRows('accSit') }
+  ], { mode: 'replace' });
+
+  // Verify ALL 42 Tele + ALL 23 Account specialists match score_calc exactly
+  for (const [form, key] of [['tele', 'teleSit'], ['account', 'accSit']]) {
+    const rawSit = readSampleRows(key);
+    const parsedSit = P.parseSituationalRows(rawSit, form, { agents: db.agents });
+    for (let i = 0; i < rawSit.length; i++) {
+      const prof = R.agentProfile(db, parsedSit[i].expertName, {});
+      assert.ok(prof, `${form}: profile exists for ${parsedSit[i].expertName}`);
+      assert.equal(prof.calls.count, Number(rawSit[i].forms_count), `${form}: count for ${parsedSit[i].expertName}`);
+      assert.equal(prof.calls.avgScore, C.round2(Number(rawSit[i].avg_score)), `${form}: fixed avg for ${parsedSit[i].expertName}`);
+      assert.equal(prof.situational.avgScore, C.round2(Number(rawSit[i].calc_situational_score)), `${form}: situational for ${parsedSit[i].expertName}`);
+    }
+  }
+
+  // Exact check for سحر سامنی under both full range and 13 Mehr..13 Aban
+  const saharAll = R.agentProfile(db, 'سحر سامنی', {});
+  assert.equal(saharAll.calls.count, 20);
+  assert.equal(saharAll.calls.avgScore, 82.75);
+  assert.equal(saharAll.situational.avgScore, 72.43);
+  assert.deepEqual(saharAll.calls.allDateRange, { from: '1405/07/26', to: '1405/08/21' });
+
+  const saharPartial = R.agentProfile(db, 'سحر سامنی', { from: '1405/07/13', to: '1405/08/13' });
+  assert.equal(saharPartial.calls.count, 18);
+  assert.equal(saharPartial.calls.allCount, 20);
+  assert.deepEqual(saharPartial.calls.allDateRange, { from: '1405/07/26', to: '1405/08/21' });
+
+  // Specialist Profile UI: 5 KPI boxes side-by-side in exact order before all remaining sections
+  const env = browser('public', db);
+  t.after(() => env.dom.window.close());
+  const { w } = env;
+  await w.App.boot();
+  w.App.bindDateRangeUI();
+  await w.App.setDateRange({ preset: 'custom', from: '1405/07/13', to: '1405/08/13' });
+  await go(w, 'portfolio/' + encodeURIComponent('سحر سامنی'));
+  await settle(); await settle();
+
+  const kpiWrap = w.document.querySelector('#pTopKpis');
+  assert.ok(kpiWrap, '#pTopKpis must exist');
+  const boxes = [...kpiWrap.querySelectorAll('.summary-block')];
+  assert.equal(boxes.length, 5, 'Exactly 5 top KPI boxes must render side-by-side');
+  assert.deepEqual(boxes.map(b => b.dataset.kpi), ['overall', 'fixed', 'situational', 'ticket', 'social']);
+  assert.deepEqual(boxes.map(b => b.querySelector('.summary-head span').textContent.trim()), [
+    'نمره کل',
+    'نمره المان‌های ثابت',
+    'نمره المان‌های موقعیتی',
+    'نمره تیکت',
+    'نمره سوشال'
+  ]);
+  assert.ok(boxes[0].textContent.includes('مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی'));
+
+  // Verify #pTopKpis comes BEFORE #pWeightedCard, .scorecard, #pSituationalCard, and #pCallHistory
+  const DOC_POS_FOLLOWING = 4;
+  for (const sel of ['#pWeightedCard', '.scorecard', '#pSituationalCard', '#pCallHistory']) {
+    const target = w.document.querySelector(sel);
+    assert.ok(target, `${sel} must be rendered`);
+    assert.ok((kpiWrap.compareDocumentPosition(target) & DOC_POS_FOLLOWING) !== 0,
+      `#pTopKpis must appear before ${sel}`);
+  }
+
+  // Date coverage alert appears because 2 of Sahar's 20 calls lie after 1405/08/13, and 1-click fit button restores all 20
+  const alertEl = w.document.querySelector('#pDateCoverageAlert');
+  assert.ok(alertEl, '#pDateCoverageAlert must appear when calls exist outside the active date filter');
+  const fitBtn = w.document.querySelector('#pFitAgentRange');
+  assert.ok(fitBtn, '#pFitAgentRange button must exist');
+  fitBtn.click();
+  await settle(); await settle();
+  assert.equal(w.App.dateRange.from, '1405/07/26');
+  assert.equal(w.App.dateRange.to, '1405/08/21');
+  assert.equal(w.document.querySelector('#pDateCoverageAlert'), null, 'Alert must disappear once full specialist range is active');
+  assert.equal(w.document.querySelector('#pTopKpis [data-kpi="fixed"] strong').textContent.trim(), '۸۲.۷۵');
+  assert.equal(w.document.querySelector('#pTopKpis [data-kpi="situational"] strong').textContent.trim(), '۷۲.۴۳');
+  assert.equal(env.errors.length, 0);
+});
+
