@@ -323,7 +323,7 @@ async function render(root, arg) {
           <td style="font-size:12px">${esc(lbl)} <span style="color:var(--muted);font-size:10px">(${fa(r.ok)}/${fa(r.total)})</span></td>
           <td style="width:1%;white-space:nowrap;text-align:center">
             <div style="display:flex;align-items:center;gap:8px">
-              <div style="flex:1;height:7px;background:rgba(148,163,184,.12);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
+              <div style="flex:1;height:7px;background:var(--soft);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
               <span style="flex-shrink:0;font-weight:600;font-size:12px;width:44px;text-align:left">${st == null ? '—' : fa(st) + '٪'}</span>
             </div>
           </td>
@@ -360,7 +360,7 @@ async function render(root, arg) {
           <td style="font-size:12px">${esc(el.label)} <span style="color:var(--muted);font-size:10px">(${countLabel})</span></td>
           <td style="width:1%;white-space:nowrap;text-align:center">
             <div style="display:flex;align-items:center;gap:8px">
-              <div style="flex:1;height:7px;background:rgba(148,163,184,.12);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
+              <div style="flex:1;height:7px;background:var(--soft);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
               <span style="flex-shrink:0;font-weight:600;font-size:12px;width:48px;text-align:left">${rate == null ? '—' : fa(rate) + '٪'}</span>
             </div>
           </td>
@@ -403,33 +403,38 @@ async function render(root, arg) {
       return '';
     };
     const isPartial = w.activeWeight < w.totalWeight;
+    const activePillars = (w.pillars || []).filter(p => p.active);
+    const activeNames = activePillars.map(p => p.label).join('، ');
     return `<div class="card" id="pWeightedCard" style="margin-bottom:16px">
       <div class="card-head teal"><div class="head-icon"><i class="fa-solid fa-scale-balanced"></i></div>
         <div>
-          <h3>ترکیب نمره کل وزن‌دار کارشناس</h3>
-          <div class="sub">وزن رسمی ۴گانه: ثابت تماس ۴۵٪ · موقعیتی ۲۵٪ · پیام‌رسان ۱۵٪ · تیکت ۱۵٪${isPartial ? ` — <b>نرمال‌شده روی ${fa(w.activeWeight)}٪ وزن فعال</b> (بخش‌های بدون داده در مخرج لحاظ نشده‌اند)` : ' — هر ۴ بخش دارای داده (۱۰۰٪ کامل)'}</div>
+          <h3>ترکیب نمره کل کارشناس</h3>
+          <div class="sub">وزن رسمی ۴گانه: ثابت تماس ۴۵٪ · موقعیتی ۲۵٪ · پیام‌رسان ۱۵٪ · تیکت ۱۵٪${isPartial ? ` — <b>بخش‌های بدون دیتا از محاسبه حذف شده‌اند</b> و نمره کل فقط از بخش‌های دارای دیتا (${esc(activeNames)}) محاسبه شده است` : ' — هر ۴ بخش دارای دیتا هستند'}</div>
         </div>
         <div class="spacer"></div>
         <div style="text-align:left">
-          <div style="font-size:11px;color:var(--muted)">نمره نهایی (از ۱۰۰)</div>
+          <div style="font-size:11px;color:var(--muted)">نمره کل نهایی (از ۱۰۰)</div>
           <div style="margin-top:2px">${scorePill(w.score)}</div>
         </div>
       </div>
       <div class="table-wrap"><table class="tbl">
-        <thead><tr><th>بخش ارزیابی</th><th>وزن رسمی</th><th>نمره بخش (از ۱۰۰)</th><th>سهم کسب‌شده</th><th>وضعیت</th></tr></thead>
-        <tbody>${(w.pillars || []).map(p => `<tr style="${p.active ? '' : 'opacity:.6'}">
+        <thead><tr><th>بخش ارزیابی</th><th>وزن رسمی</th><th>نمره بخش (از ۱۰۰)</th><th>سهم در این کارنامه</th><th>وضعیت</th></tr></thead>
+        <tbody>${(w.pillars || []).map(p => {
+          const effShare = p.active && w.activeWeight > 0 ? C.round2(p.weight * 100 / w.activeWeight) : 0;
+          return `<tr style="${p.active ? '' : 'opacity:.65'}">
           <td><b>${esc(p.label)}</b>${srcBadge(p.key)}</td>
           <td>${fa(p.weight)}٪</td>
-          <td>${p.active ? scorePill(p.score) : '—'}</td>
-          <td>${p.active ? `<b>${fa(p.earned)}</b> <small style="color:var(--muted)">از ${fa(p.weight)}</small>` : `<span style="color:var(--muted)">۰ از ${fa(p.weight)}</span>`}</td>
-          <td>${p.active ? '<span class="badge ok">فعال در محاسبه</span>' : '<span class="badge gray">بدون داده</span>'}</td>
-        </tr>`).join('')}
+          <td>${p.active ? scorePill(p.score) : '<span style="color:var(--muted)">—</span>'}</td>
+          <td>${p.active ? `<b>${fa(effShare)}٪</b> <small style="color:var(--muted)">(سهم مؤثر در نمره کل)</small>` : '<span style="color:var(--muted)">از محاسبه حذف شد</span>'}</td>
+          <td>${p.active ? '<span class="badge ok">لحاظ شده در محاسبه</span>' : '<span class="badge gray">دیتایی موجود نیست</span>'}</td>
+        </tr>`;
+        }).join('')}
         <tr style="background:var(--panel-soft);font-weight:700">
-          <td>جمع سهم کسب‌شده / نمره کل نرمال‌شده</td>
-          <td>${fa(w.activeWeight)}٪ <small style="font-weight:400;color:var(--muted)">از ${fa(w.totalWeight)}٪</small></td>
+          <td>نمره کل نهایی کارشناس</td>
+          <td>${fa(activePillars.length)} از ۴ بخش</td>
           <td>${scorePill(w.score)}</td>
-          <td><b>${fa(w.rawWeightedSum)}</b> <small style="font-weight:400;color:var(--muted)">از ${fa(w.activeWeight)}</small></td>
-          <td><span class="badge ${isPartial ? 'info' : 'ok'}">${isPartial ? 'نرمال‌سازی شده' : 'کامل'}</span></td>
+          <td><b>۱۰۰٪</b> <small style="font-weight:400;color:var(--muted)">از بخش‌های دارای دیتا</small></td>
+          <td><span class="badge ${isPartial ? 'info' : 'ok'}">${isPartial ? 'محاسبه از بخش‌های موجود' : 'هر ۴ بخش کامل'}</span></td>
         </tr></tbody>
       </table></div>
     </div>`;
@@ -521,7 +526,7 @@ async function render(root, arg) {
     if (!Array.isArray(redlineRows) || !redlineRows.length) return '';
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-head" style="border-color:rgba(248,113,113,.3)">
-        <div class="head-icon" style="background:rgba(248,113,113,.12);color:#f87171"><i class="fa-solid fa-ban"></i></div>
+        <div class="head-icon" style="background:var(--bad-soft);color:var(--bad)"><i class="fa-solid fa-ban"></i></div>
         <div><h3>ردلاین‌ها (${fa(redlineRows.length)} مورد)</h3><div class="sub">علت و جزئیات هر ردلاین — کلیک روی لید = جستجو</div></div></div>
       <div class="table-wrap">
         <table class="tbl"><thead><tr><th>تاریخ</th><th>لید</th><th>نوع</th><th>نمره</th><th>علت ردلاین</th></tr></thead>
@@ -530,13 +535,13 @@ async function render(root, arg) {
           <td>${esc(r.leadName || '—')}<div style="font-size:10px;color:var(--muted)" dir="ltr">${esc(r.leadPhone || '')}</div></td>
           <td><span class="tag-team">${FORM_TYPE_FA[r.formType] || r.formType}</span></td>
           <td>${r.score != null ? scorePill(r.score) : '—'}</td>
-          <td style="font-size:12px;color:#fca5a5;max-width:300px">${esc(r.reason || '(ثبت نشده)')}${r.qcComment ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">"${esc(r.qcComment)}"</div>` : ''}</td>
+          <td style="font-size:12px;color:var(--bad);max-width:300px">${esc(r.reason || '(ثبت نشده)')}${r.qcComment ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">"${esc(r.qcComment)}"</div>` : ''}</td>
         </tr>`).join('')}</tbody></table></div></div>`;
   }
 
   function renderProfile(body, d, periodLabel) {
     const a = d.agent;
-    const monthLine = periodLabel && periodLabel !== 'همه دوره‌ها' ? `<span class="tag-team" style="background:rgba(167,139,250,.12);color:#a78bfa;border-color:rgba(167,139,250,.3)"><i class="fa-regular fa-calendar"></i> ${esc(periodLabel)}</span>` : '<span class="tag-team">همه دوره‌ها</span>';
+    const monthLine = periodLabel && periodLabel !== 'همه دوره‌ها' ? `<span class="tag-team" style="background:var(--violet-soft);color:var(--violet)"><i class="fa-regular fa-calendar"></i> ${esc(periodLabel)}</span>` : '<span class="tag-team">همه دوره‌ها</span>';
     const T = d.tickets, S = d.socials, Ph = d.calls, Sit = d.situational || { hasData: false };
 
     const allKeys = [...new Set([
@@ -600,27 +605,33 @@ async function render(root, arg) {
         <div class="summary-block kpi-primary" data-kpi="overall">
           <div class="summary-head"><i class="fa-solid fa-scale-balanced"></i><span>نمره کل</span></div>
           <strong>${fmtVal(d.weighted && d.weighted.score)}</strong>
-          <small class="summary-sub">مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی${d.weighted && d.weighted.activeWeight ? ` · ${d.weighted.activeWeight < 100 ? `وزن فعال ${fa(d.weighted.activeWeight)}٪` : '۱۰۰٪ کامل'}` : ''}</small>
+          <small class="summary-sub">${(() => {
+            const act = d.weighted && d.weighted.pillars ? d.weighted.pillars.filter(p => p.active).length : 0;
+            if (!act) return 'دیتایی موجود نیست';
+            return act < 4
+              ? `مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی · فقط ${fa(act)} بخش دارای دیتا (بقیه حذف شدند)`
+              : 'مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی';
+          })()}</small>
         </div>
         <div class="summary-block ${Ph.redlineCount > 0 ? 'kpi-danger' : ''}" data-kpi="fixed">
           <div class="summary-head"><i class="fa-solid fa-headset"></i><span>نمره المان‌های ثابت</span></div>
           <strong>${fmtVal(Ph.avgScore)}</strong>
-          <small class="summary-sub">ضریب ۴۵٪ · ${fa(Ph.count)} تماس${Ph.redlineCount ? ` · ردلاین ${fa(Ph.redlineCount)}` : ''}</small>
+          <small class="summary-sub">${Ph.count ? `ضریب ۴۵٪ · ${fa(Ph.count)} تماس${Ph.redlineCount ? ` · ردلاین ${fa(Ph.redlineCount)}` : ''}` : 'ضریب ۴۵٪ · دیتایی موجود نیست'}</small>
         </div>
         <div class="summary-block" data-kpi="situational">
           <div class="summary-head"><i class="fa-solid fa-sliders"></i><span>نمره المان‌های موقعیتی</span></div>
           <strong>${Sit.hasData ? fmtVal(Sit.avgScore) : '—'}</strong>
-          <small class="summary-sub">ضریب ۲۵٪ · ${Sit.hasData ? `${fa(Sit.formsCount || 0)} فرم${sitPeriodTxt}` : 'بدون داده'}</small>
+          <small class="summary-sub">ضریب ۲۵٪ · ${Sit.hasData ? `${fa(Sit.formsCount || 0)} فرم${sitPeriodTxt}` : 'دیتایی موجود نیست'}</small>
         </div>
         <div class="summary-block ${T.redlineZero > 0 ? 'kpi-warn' : ''}" data-kpi="ticket">
           <div class="summary-head"><i class="fa-solid fa-ticket"></i><span>نمره تیکت</span></div>
           <strong>${fmtVal(T.avgScore)}</strong>
-          <small class="summary-sub">ضریب ۱۵٪ · ${fa(T.count)} ارزیابی${T.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${T.redlineZero ? ` · ردلاین ${fa(T.redlineZero)}` : ''}</small>
+          <small class="summary-sub">${T.avgScore !== '' && T.avgScore != null ? `ضریب ۱۵٪ · ${fa(T.count)} ارزیابی${T.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${T.redlineZero ? ` · ردلاین ${fa(T.redlineZero)}` : ''}` : 'ضریب ۱۵٪ · دیتایی موجود نیست'}</small>
         </div>
         <div class="summary-block ${S.slaReal !== '' && S.slaReal < 70 ? 'kpi-warn' : ''}" data-kpi="social">
           <div class="summary-head"><i class="fa-solid fa-comments"></i><span>نمره سوشال</span></div>
           <strong>${fmtVal(S.avgScore)}</strong>
-          <small class="summary-sub">ضریب ۱۵٪ · ${fa(S.count)} ارزیابی${S.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${S.slaReal === '' ? '' : ` · SLA ${fa(S.slaReal)}٪`}${S.unanswered ? ` · عدم پاسخ ${fa(S.unanswered)}` : ''}</small>
+          <small class="summary-sub">${S.avgScore !== '' && S.avgScore != null ? `ضریب ۱۵٪ · ${fa(S.count)} ارزیابی${S.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${S.slaReal === '' ? '' : ` · SLA ${fa(S.slaReal)}٪`}${S.unanswered ? ` · عدم پاسخ ${fa(S.unanswered)}` : ''}` : 'ضریب ۱۵٪ · دیتایی موجود نیست'}</small>
         </div>
       </div>
 
@@ -779,11 +790,11 @@ async function render(root, arg) {
     }] : [];
     const w = curData.weighted;
     const weightedSheet = w && w.activeWeight ? [{
-      name: 'نمره کل وزن‌دار',
+      name: 'نمره کل کارشناس',
       rows: [
-        ['بخش ارزیابی', 'وزن رسمی (٪)', 'نمره بخش', 'سهم کسب‌شده', 'وضعیت'],
-        ...(w.pillars || []).map(p => [p.label, p.weight, p.active ? p.score : '', p.active ? p.earned : 0, p.active ? 'فعال' : 'بدون داده']),
-        ['نمره نهایی نرمال‌شده', w.activeWeight, w.score, w.rawWeightedSum, w.activeWeight < w.totalWeight ? 'نرمال‌سازی شده' : 'کامل']
+        ['بخش ارزیابی', 'وزن رسمی (٪)', 'نمره بخش', 'سهم مؤثر در این کارنامه (٪)', 'وضعیت'],
+        ...(w.pillars || []).map(p => [p.label, p.weight, p.active ? p.score : '', p.active ? C.round2(p.weight * 100 / w.activeWeight) : 0, p.active ? 'لحاظ شده در محاسبه' : 'دیتایی موجود نیست']),
+        ['نمره کل نهایی', w.activeWeight, w.score, 100, w.activeWeight < w.totalWeight ? 'محاسبه از بخش‌های دارای دیتا' : 'هر ۴ بخش کامل']
       ]
     }] : [];
     window.QCExport.sheets(`${a.name} — پرونده`, [

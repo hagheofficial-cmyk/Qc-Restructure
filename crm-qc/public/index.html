@@ -5,19 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>سامانه یکپارچه کنترل کیفیت CRM</title>
 <link href="vendor/fontawesome/css/all.min.css" rel="stylesheet">
-<link rel="icon" type="image/png" sizes="64x64" href="favicon.png?v=3">
-<link rel="shortcut icon" href="favicon.ico?v=3">
+<link rel="icon" type="image/png" sizes="64x64" href="favicon.png?v=4">
+<link rel="shortcut icon" type="image/png" href="favicon.png?v=4">
 <link rel="manifest" href="manifest.webmanifest">
 <script>
-/* آیکون سربرگ مرورگر: اگر favicon.png در دسترس نباشد (صفحه‌ای که داخل بسته‌ی
- * اکستنشن یا HtmlService باز می‌شود)، آیکون از خود لوگوی سامانه ساخته می‌شود تا
- * آیکون پیش‌فرض مرورگر/اکستنشن روی تب نماند. */
+/* آیکون سربرگ مرورگر: لوگوی رسمی سامانه همیشه به‌صورت ایمن روی تب مرورگر تنظیم می‌شود. */
 (function () {
   function paint() {
     try {
       var src = window.APP_SCRIPT_LOGO_DATA || 'logo.png';
       var link = document.querySelector('link[rel="icon"]');
       if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      var shortcut = document.querySelector('link[rel="shortcut icon"]');
       var img = new Image();
       img.onload = function () {
         try {
@@ -26,8 +25,10 @@
           var ctx = canvas.getContext('2d');
           var size = Math.min(img.width || 64, img.height || 64);
           ctx.drawImage(img, ((img.width || 64) - size) / 2, ((img.height || 64) - size) / 2, size, size, 0, 0, 64, 64);
+          var png = canvas.toDataURL('image/png');
           link.type = 'image/png';
-          link.href = canvas.toDataURL('image/png');
+          link.href = png;
+          if (shortcut) { shortcut.type = 'image/png'; shortcut.href = png; }
         } catch (e) {}
       };
       img.src = src;
@@ -112,6 +113,7 @@
       <div class="topbar-left">
         <span class="data-source-badge" id="dataSourceBadge">سرور</span>
         <button class="btn ghost sm sync-chip" id="syncChip" type="button" hidden title="داده‌های شیت بعد از آخرین خواندن تغییر کرده است"><i class="fa-solid fa-arrows-rotate"></i><span>داده‌ها تازه شد — بروزرسانی</span></button>
+        <button class="btn soft sm quick-backup-btn" id="quickBackupBtn" type="button" title="بکاپ یک‌کلیکه همه داده‌ها و انتقال روی نسخه جدید"><i class="fa-solid fa-cloud-arrow-down"></i><span>بکاپ / انتقال</span></button>
         <button class="theme-toggle" id="themeToggle" type="button" aria-label="تغییر حالت روشن و تاریک" title="تغییر حالت روشن و تاریک"><i class="fa-solid fa-sun"></i><span>حالت روشن</span></button>
         <div class="user-chip" id="userChip" hidden>
           <span class="user-avatar" aria-hidden="true"><i class="fa-solid fa-user"></i></span>

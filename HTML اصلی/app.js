@@ -695,7 +695,8 @@ function scoreBands() {
 }
 function scoreColorHex(v) {
   const B = scoreBands();
-  return v >= B[0] ? '#34d399' : v >= B[1] ? '#38bdf8' : v >= B[2] ? '#fbbf24' : '#f87171';
+  const isL = document.documentElement.dataset.theme === 'light';
+  return v >= B[0] ? (isL ? '#0d7a5f' : '#34d399') : v >= B[1] ? (isL ? '#0274b3' : '#38bdf8') : v >= B[2] ? (isL ? '#b45309' : '#fbbf24') : (isL ? '#be123c' : '#f87171');
 }
 function scoreColorRgba(v) {
   const B = scoreBands();
@@ -974,14 +975,225 @@ const App = {
     try { localStorage.setItem('crmqc.theme.v1', this.theme); } catch(e) {}
     const button = $('#themeToggle');
     if (button) { button.innerHTML = `<i class="fa-solid ${this.theme === 'dark' ? 'fa-sun' : 'fa-moon'}"></i><span>${this.theme === 'dark' ? 'حالت روشن' : 'حالت تاریک'}</span>`; button.setAttribute('aria-pressed',String(this.theme === 'light')); }
-    this.charts.forEach(chart => { if (!chart.config || !chart.config.options) return; this.styleChart(chart.config.options); if (chart.update) chart.update('none'); });
-    const frame = $('#crFrame'); if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type:'crmqc:theme', theme:this.theme }, location.origin === 'null' ? '*' : location.origin);
+    this.charts.forEach(chart => {
+      if (!chart.config || !chart.config.options) return;
+      this.styleChart(chart.config.options, chart);
+      if (chart.update) chart.update('none');
+    });
+    const targetOrigin = location.origin === 'null' ? '*' : location.origin;
+    $$('#crFrame, .cr-embed-frame').forEach(frame => {
+      if (frame && frame.contentWindow) {
+        try { frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: this.theme }, '*'); }
+        catch (e) { try { frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: this.theme }, targetOrigin); } catch (_) {} }
+      }
+    });
   },
-  styleChart(options) {
-    const css = getComputedStyle(document.documentElement), color = css.getPropertyValue('--muted').trim(), grid = css.getPropertyValue('--line-soft').trim();
-    if (options.scales) Object.values(options.scales).forEach(scale => { scale.ticks = Object.assign({},scale.ticks,{ color }); scale.grid = Object.assign({},scale.grid,{ color:grid }); });
-    options.plugins = options.plugins || {}; options.plugins.legend = options.plugins.legend || {};
-    options.plugins.legend.labels = Object.assign({}, options.plugins.legend.labels, { color });
+  styleChart(options, chart) {
+    const css = getComputedStyle(document.documentElement);
+    const color = css.getPropertyValue('--muted').trim() || '#8ea0bd';
+    const ink = css.getPropertyValue('--ink').trim() || '#f1f5f9';
+    const ink2 = css.getPropertyValue('--ink-2').trim() || '#cbd5e1';
+    const panel = css.getPropertyValue('--panel').trim() || '#111a2e';
+    const line = css.getPropertyValue('--line').trim() || '#22304f';
+    const grid = css.getPropertyValue('--line-soft').trim() || '#1b2742';
+    if (options.scales) Object.values(options.scales).forEach(scale => {
+      scale.ticks = Object.assign({}, scale.ticks, { color });
+      scale.grid = Object.assign({}, scale.grid, { color: grid });
+    });
+    options.plugins = options.plugins || {};
+    options.plugins.legend = options.plugins.legend || {};
+    options.plugins.legend.labels = Object.assign({}, options.plugins.legend.labels, { color: ink2 });
+    options.plugins.tooltip = Object.assign({}, options.plugins.tooltip, {
+      backgroundColor: panel, titleColor: ink, bodyColor: ink2, borderColor: line, borderWidth: 1, padding: 10
+    });
+    if (chart && chart.config && (chart.config.type === 'doughnut' || chart.config.type === 'pie') && chart.data && Array.isArray(chart.data.datasets)) {
+      chart.data.datasets.forEach(ds => { if (ds && ds.borderWidth) ds.borderColor = panel; });
+    }
+  },
+
+  /* ---------- بکاپ یک‌کلیکه کامل و بازیابی روی نسخه جدید ---------- */
+  collectBrowserCallReportStorage() {
+    const out = {};
+    ['bimeh_bazar_experts_v2', 'bimeh_bazar_team_access_profiles_v1'].forEach((k) => {
+      try { const v = localStorage.getItem(k); if (v != null && v !== '') out[k] = v; } catch (e) {}
+    });
+    return out;
+  },
+  applyBrowserCallReportStorage(map) {
+    if (!map || typeof map !== 'object') return;
+    ['bimeh_bazar_experts_v2', 'bimeh_bazar_team_access_profiles_v1'].forEach((k) => {
+      if (map[k] == null) return;
+      try {
+        const val = typeof map[k] === 'string' ? map[k] : JSON.stringify(map[k]);
+        localStorage.setItem(k, val);
+      } catch (e) {}
+    });
+  },
+  async downloadFullBackup(opts) {
+    opts = opts || {};
+    const from = opts.from || '', to = opts.to || '';
+    const qs = (from || to) ? '?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) : '';
+    const data = await api.get('/api/backup' + qs);
+    if (!data.callReportStorage) {
+      const localCr = this.collectBrowserCallReportStorage();
+      if (Object.keys(localCr).length) data.callReportStorage = localCr;
+    }
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (from || to)
+      ? `crm-qc-backup-${from ? from.replaceAll('/', '-') : 'start'}_${to ? to.replaceAll('/', '-') : 'end'}.json`
+      : `crm-qc-full-backup-${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return data;
+  },
+  openQuickBackup() {
+    if (window.QCAuth && !window.QCAuth.can('data')) {
+      toast.error('فقط مدیر سامانه به بکاپ و بازیابی دسترسی دارد');
+      return;
+    }
+    const m = modal(`${modalHead('بکاپ کامل و انتقال به نسخه جدید سامانه', 'fa-cloud-arrow-down')}
+      <div class="modal-body"><div class="qb-wrap">
+        <div class="note" style="margin-bottom:14px">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>با یک کلیک از <b>کل داده‌های ثبت‌شده روی سامانه</b> (تیکت، سوشال، ریت تماس ثابت، موقعیتی، نمرات ماهانه، کارشناسان، اقدامات و یادآورها، ماه‌های مالی، المان‌ها، کاربران QC، تنظیمات و لیست کارشناسان گزارش تماس) فایل بکاپ بگیرید و پس از آپدیت کد روی نسخه جدید آپلود کنید.</span>
+        </div>
+        <div class="qb-grid">
+          <div class="qb-box">
+            <div class="qb-box-head"><span class="qb-ic good"><i class="fa-solid fa-cloud-arrow-down"></i></span><div><strong>۱) دریافت بکاپ کامل (یک کلیک)</strong><small>دانلود فایل JSON شامل همه اطلاعات سامانه بدون محدودیت تاریخ</small></div></div>
+            <button type="button" class="btn primary" id="qbDownloadBtn" style="width:100%"><i class="fa-solid fa-floppy-disk"></i> دانلود بکاپ کامل همه داده‌ها</button>
+            <div id="qbDownInfo" class="qb-status" hidden></div>
+          </div>
+          <div class="qb-box">
+            <div class="qb-box-head"><span class="qb-ic brand"><i class="fa-solid fa-cloud-arrow-up"></i></span><div><strong>۲) آپلود بکاپ روی نسخه جدید</strong><small>فایل بکاپ JSON را انتخاب کنید تا همه داده‌ها یکجا بازیابی شوند</small></div></div>
+            <button type="button" class="btn soft" id="qbPickBtn" style="width:100%"><i class="fa-solid fa-file-arrow-up"></i> انتخاب فایل بکاپ (.json)</button>
+            <input type="file" id="qbFileInp" accept=".json,application/json" hidden>
+            <div id="qbPreview" class="qb-preview" hidden></div>
+            <div id="qbRestoreControls" class="qb-restore-ctl" hidden>
+              <div class="qb-mode-row">
+                <label class="qb-mode-opt"><input type="radio" name="qbMode" value="replace" checked><span><b>جایگزینی کامل</b><small>پیشنهادی برای انتقال به نسخه جدید</small></span></label>
+                <label class="qb-mode-opt"><input type="radio" name="qbMode" value="append"><span><b>ادغام با داده‌های فعلی</b><small>حفظ داده‌های موجود + افزودن بکاپ</small></span></label>
+              </div>
+              <button type="button" class="btn primary" id="qbApplyBtn" style="width:100%"><i class="fa-solid fa-check-double"></i> شروع بازیابی کامل</button>
+            </div>
+            <div id="qbUpInfo" class="qb-status" hidden></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="modal-foot"><button type="button" class="btn ghost" id="qbClose" data-close>بستن</button></div>`, { lg: true });
+    const root = m;
+    $('#qbClose', root).addEventListener('click', () => m.close());
+    $('#qbDownloadBtn', root).addEventListener('click', async () => {
+      const btn = $('#qbDownloadBtn', root);
+      const info = $('#qbDownInfo', root);
+      btn.disabled = true;
+      try {
+        const data = await this.downloadFullBackup();
+        const actCount = Object.values(data.agentActions || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0);
+        info.hidden = false;
+        info.className = 'qb-status ok';
+        info.innerHTML = `<i class="fa-solid fa-circle-check"></i> بکاپ کامل دانلود شد: <b>${fa((data.agents || []).length)}</b> کارشناس · <b>${fa((data.tickets || []).length)}</b> تیکت · <b>${fa((data.socials || []).length)}</b> سوشال · <b>${fa((data.callFeedbacks || []).length)}</b> تماس ثابت · <b>${fa((data.callSituational || []).length)}</b> موقعیتی · <b>${fa((data.monthlyScores || []).length)}</b> نمره ماهانه · <b>${fa(actCount)}</b> اقدام · <b>${fa((data.reminders || []).length)}</b> یادآور · <b>${fa((data.fiscalMonths || []).length)}</b> ماه مالی`;
+        toast.success('فایل بکاپ کامل همه داده‌ها با موفقیت دانلود شد');
+      } catch (e) {
+        info.hidden = false;
+        info.className = 'qb-status bad';
+        info.textContent = 'خطا در تهیه بکاپ: ' + e.message;
+        toast.error(e.message);
+      }
+      btn.disabled = false;
+    });
+
+    let pendingObj = null, pendingKind = '';
+    const pickBtn = $('#qbPickBtn', root), fileInp = $('#qbFileInp', root);
+    const prevEl = $('#qbPreview', root), ctlEl = $('#qbRestoreControls', root), upInfo = $('#qbUpInfo', root);
+    pickBtn.addEventListener('click', () => fileInp.click());
+    fileInp.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const obj = JSON.parse(rd.result);
+          const isBackup = obj && obj.schema === 'crm-qc-backup';
+          const isRecovery = obj && (obj.teleRawData || obj.accRawData || obj.mlmRawData);
+          if (!isBackup && !isRecovery) throw new Error('این فایل بکاپ معتبر سامانه کنترل کیفیت نیست');
+          pendingObj = obj;
+          pendingKind = isBackup ? 'backup' : 'recovery';
+          upInfo.hidden = true;
+          prevEl.hidden = false;
+          if (isBackup) {
+            const actCount = Object.values(obj.agentActions || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0);
+            const crCount = (() => {
+              try {
+                const raw = obj.callReportStorage && obj.callReportStorage.bimeh_bazar_experts_v2;
+                const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                return Array.isArray(parsed) ? parsed.length : 0;
+              } catch (_) { return 0; }
+            })();
+            prevEl.innerHTML = `<div class="qb-prev-title"><i class="fa-solid fa-file-code"></i> <b>${esc(f.name)}</b> <small>(نسخه ${fa(obj.version || 3)})</small></div>
+              <div class="qb-prev-tags">
+                <span>کارشناسان: <b>${fa((obj.agents || []).length)}</b></span>
+                <span>تیکت: <b>${fa((obj.tickets || []).length)}</b></span>
+                <span>سوشال: <b>${fa((obj.socials || []).length)}</b></span>
+                <span>تماس ثابت: <b>${fa((obj.callFeedbacks || []).length)}</b></span>
+                <span>موقعیتی: <b>${fa((obj.callSituational || []).length)}</b></span>
+                <span>نمرات ماهانه: <b>${fa((obj.monthlyScores || []).length)}</b></span>
+                <span>اقدامات: <b>${fa(actCount)}</b></span>
+                <span>یادآورها: <b>${fa((obj.reminders || []).length)}</b></span>
+                <span>ماه‌های مالی: <b>${fa((obj.fiscalMonths || []).length)}</b></span>
+                <span>کاربران QC: <b>${fa((obj.qcUsers || []).length)}</b></span>
+                ${crCount ? `<span>گزارش تماس: <b>${fa(crCount)}</b> کارشناس</span>` : ''}
+              </div>`;
+          } else {
+            const c = (obj.teleRawData || []).length + (obj.accRawData || []).length + (obj.mlmRawData || []).length;
+            prevEl.innerHTML = `<div class="qb-prev-title"><i class="fa-solid fa-file-code"></i> <b>${esc(f.name)}</b></div><div class="qb-prev-tags"><span>ریت تماس بازیابی: <b>${fa(c)}</b></span></div>`;
+          }
+          ctlEl.hidden = false;
+        } catch (err) {
+          pendingObj = null; ctlEl.hidden = true; prevEl.hidden = true;
+          upInfo.hidden = false; upInfo.className = 'qb-status bad';
+          upInfo.textContent = err.message || 'فایل JSON نامعتبر است';
+        }
+        e.target.value = '';
+      };
+      rd.readAsText(f, 'utf-8');
+    });
+
+    $('#qbApplyBtn', root).addEventListener('click', async () => {
+      if (!pendingObj) return;
+      const btn = $('#qbApplyBtn', root);
+      const modeInput = root.querySelector('input[name="qbMode"]:checked');
+      const mode = modeInput ? modeInput.value : 'replace';
+      btn.disabled = true;
+      upInfo.hidden = false;
+      upInfo.className = 'qb-status';
+      upInfo.innerHTML = '<i class="fa-solid fa-spinner spin"></i> در حال بازیابی همه داده‌ها…';
+      try {
+        const r = pendingKind === 'backup'
+          ? await api.post('/api/backup', { backup: pendingObj, mode })
+          : await api.post('/api/calls', { recovery: pendingObj, mode });
+        if (pendingKind === 'backup' && pendingObj.callReportStorage) {
+          this.applyBrowserCallReportStorage(pendingObj.callReportStorage);
+        }
+        if (api.clearCache) api.clearCache(true);
+        await this.boot();
+        await this.route();
+        upInfo.className = 'qb-status ok';
+        upInfo.innerHTML = pendingKind === 'backup'
+          ? `<i class="fa-solid fa-circle-check"></i> بازیابی کامل انجام شد! (${fa(r.restored.agents)} کارشناس · ${fa(r.restored.tickets)} تیکت · ${fa(r.restored.socials)} سوشال · ${fa(r.restored.calls)} تماس ثابت · ${fa(r.restored.callSituational || 0)} موقعیتی · ${fa(r.restored.monthlyScores || 0)} نمره ماهانه)`
+          : '<i class="fa-solid fa-circle-check"></i> داده‌های تماس با موفقیت بازیابی شدند.';
+        toast.success('همه داده‌های بکاپ با موفقیت روی سامانه بازیابی شدند');
+      } catch (err) {
+        upInfo.className = 'qb-status bad';
+        upInfo.textContent = 'خطا در بازیابی: ' + err.message;
+        toast.error(err.message);
+      }
+      btn.disabled = false;
+    });
   },
 
   register(name, spec) { this.routes[name] = spec; },
@@ -1223,6 +1435,8 @@ const App = {
   /* رویدادهای ثابت پوسته (پیش از ورود هم فعال‌اند) */
   bindChrome() {
     $('#themeToggle').addEventListener('click', () => this.applyTheme(this.theme === 'dark' ? 'light' : 'dark'));
+    const quickBackup = $('#quickBackupBtn');
+    if (quickBackup) quickBackup.addEventListener('click', () => this.openQuickBackup());
     const logout = $('#logoutBtn');
     if (logout) logout.addEventListener('click', () => { if (window.QCAuth) window.QCAuth.logout(); });
     const syncChip = $('#syncChip');

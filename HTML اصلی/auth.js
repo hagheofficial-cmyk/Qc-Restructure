@@ -80,6 +80,8 @@ const QCAuth = {
       const visible = $$('.nav-subitem', g).some((a) => !a.hidden);
       g.hidden = !visible;
     });
+    const quickBackup = document.getElementById('quickBackupBtn');
+    if (quickBackup) quickBackup.hidden = !this.can('data');
   },
 
   /* bootstrap آماده‌ی همان ورود؛ App آن را به‌جای درخواست دوباره مصرف می‌کند. */

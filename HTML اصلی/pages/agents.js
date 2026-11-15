@@ -20,9 +20,9 @@ function normTeamKey(teamName) {
 }
 function teamBadge(t) {
   const k = normTeamKey(t);
-  const colors = { tele: ['#38bdf8', 'rgba(56,189,248,.12)'], account: ['#a78bfa', 'rgba(167,139,250,.12)'], mlm: ['#34d399', 'rgba(52,211,153,.12)'] };
-  const cx = colors[k] || ['#6b7ba0', 'rgba(107,123,160,.1)'];
-  return `<span class="tag-team" style="background:${cx[1]};color:${cx[0]};border-color:${cx[0]}33">${esc(t)}</span>`;
+  const colors = { tele: ['var(--brand)', 'var(--brand-soft)'], account: ['var(--violet)', 'var(--violet-soft)'], mlm: ['var(--good)', 'var(--good-soft)'] };
+  const cx = colors[k] || ['var(--muted)', 'var(--soft)'];
+  return `<span class="tag-team" style="background:${cx[1]};color:${cx[0]}">${esc(t)}</span>`;
 }
 
 /* نام‌های کارشناس QC مسئول یک کارشناس — همان ستون qcAgents تب Agents */

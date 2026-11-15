@@ -410,9 +410,13 @@ function dispatch(method, url, body) {
     const to = q.to || '';
     const inRange = (d) => R.inRange(d, from, to);
     return clone({
-      schema: 'crm-qc-backup', version: 3, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
+      schema: 'crm-qc-backup', version: 4, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
       range: { from: from || null, to: to || null },
-      settings: db.settings, agents: db.agents, qcAgents: db.qcAgents,
+      settings: db.settings, lists: db.lists || {},
+      agents: db.agents, qcAgents: db.qcAgents,
+      qcUsers: db.qcUsers || [],
+      fiscalMonths: db.fiscalMonths || [],
+      elements: db.elements || [],
       agentActions: db.agentActions || {},
       actionTypes: X.actionTypes(db),
       reminders: X.reminderList(db),

@@ -137,7 +137,28 @@ window.QCSystemAgents = {
 window.addEventListener('message', (event) => {
   if (event.source !== window.parent || !event.data) return;
   if (location.protocol !== 'file:' && location.origin !== 'null' && event.origin !== location.origin) return;
-  if (event.data.type === 'crmqc:theme') { document.documentElement.dataset.theme = event.data.theme === 'light' ? 'light' : 'dark'; if (typeof avgDurationChart !== 'undefined' && avgDurationChart && avgDurationChart.update) avgDurationChart.update('none'); return; }
+  if (event.data.type === 'crmqc:theme') {
+    const isLight = event.data.theme === 'light';
+    document.documentElement.dataset.theme = isLight ? 'light' : 'dark';
+    const ink = isLight ? '#1c2c42' : '#ffffff';
+    const grid = isLight ? '#dce6f1' : '#334155';
+    const border = isLight ? '#ffffff' : '#1e2937';
+    if (typeof avgDurationChart !== 'undefined' && avgDurationChart && avgDurationChart.options) {
+      if (avgDurationChart.data && avgDurationChart.data.datasets && avgDurationChart.data.datasets[0]) avgDurationChart.data.datasets[0].borderColor = border;
+      if (avgDurationChart.options.plugins && avgDurationChart.options.plugins.legend && avgDurationChart.options.plugins.legend.labels) avgDurationChart.options.plugins.legend.labels.color = ink;
+      avgDurationChart.update('none');
+    }
+    if (typeof lineChart !== 'undefined' && lineChart && lineChart.options) {
+      const sc = lineChart.options.scales || {};
+      if (sc.x && sc.x.ticks) sc.x.ticks.color = ink;
+      if (sc.x && sc.x.grid) sc.x.grid.color = grid;
+      if (sc.y && sc.y.ticks) sc.y.ticks.color = ink;
+      if (sc.y && sc.y.grid) sc.y.grid.color = grid;
+      if (lineChart.options.plugins && lineChart.options.plugins.legend && lineChart.options.plugins.legend.labels) lineChart.options.plugins.legend.labels.color = ink;
+      lineChart.update('none');
+    }
+    return;
+  }
   if (event.data.type === 'crmqc:date-range') { apply(event.data.range || {}); return; }
   if (event.data.type === 'crmqc:system-agents' && Array.isArray(event.data.agents)) {
     cachedSystemAgents = event.data.agents;

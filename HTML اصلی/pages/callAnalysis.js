@@ -15,12 +15,12 @@ const FORM_TABS = [
 ];
 const FORM_FA = { tele: 'Telesales', account: 'اکانت', mlm: 'MLM' };
 
-function heatColor(rate) {
-  if (rate == null) return 'background:rgba(30,41,59,.5);color:var(--muted)';
-  if (rate >= 50) return 'background:rgba(248,113,113,.4);color:#fecaca';
-  if (rate >= 25) return 'background:rgba(251,191,36,.32);color:#fde68a';
-  if (rate >= 8) return 'background:rgba(251,146,60,.18);color:#fdba74';
-  return 'background:rgba(52,211,153,.12);color:#6ee7b7';
+function heatClass(rate) {
+  if (rate == null) return 'hm-cell hm-none';
+  if (rate >= 50) return 'hm-cell hm-high';
+  if (rate >= 25) return 'hm-cell hm-med';
+  if (rate >= 8) return 'hm-cell hm-low';
+  return 'hm-cell hm-ok';
 }
 
 function heatVal(cell) {
@@ -138,13 +138,13 @@ async function render(root) {
 
     const kpiRow = `
     <div class="analysis-kpis">
-      ${kpi('fa-phone-volume', 'تعداد ریت تماس', fa(k.totalCalls || 0), '#38bdf8')}
-      ${kpi('fa-star-half-stroke', 'میانگین نمره ثابت', k.avgScore === '' ? '—' : fa(k.avgScore), '#34d399')}
-      ${k.situationalCount > 0 ? kpi('fa-sliders', 'میانگین نمره موقعیتی', k.situationalAvg === '' ? '—' : fa(k.situationalAvg), '#818cf8') : ''}
-      ${kpi('fa-ban', 'ردلاین', fa(k.redlineCount || 0), '#f87171')}
-      ${kpi('fa-user-check', 'کارشناسان ارزیابی شده', fa(k.expertsWithData || 0), '#a78bfa')}
-      ${kpi('fa-comment-dots', 'دارای کامنت QC', fa(k.withComment || 0), '#fbbf24')}
-      ${kpi('fa-headphones', 'دارای زمان شنود', fa(k.listeningCalls || 0), '#f472b6')}
+      ${kpi('fa-phone-volume', 'تعداد ریت تماس', fa(k.totalCalls || 0), 'var(--brand)')}
+      ${kpi('fa-star-half-stroke', 'میانگین نمره ثابت', k.avgScore === '' ? '—' : fa(k.avgScore), 'var(--ok)')}
+      ${k.situationalCount > 0 ? kpi('fa-sliders', 'میانگین نمره موقعیتی', k.situationalAvg === '' ? '—' : fa(k.situationalAvg), 'var(--violet)') : ''}
+      ${kpi('fa-ban', 'ردلاین', fa(k.redlineCount || 0), 'var(--bad)')}
+      ${kpi('fa-user-check', 'کارشناسان ارزیابی شده', fa(k.expertsWithData || 0), 'var(--violet)')}
+      ${kpi('fa-comment-dots', 'دارای کامنت QC', fa(k.withComment || 0), 'var(--warn)')}
+      ${kpi('fa-headphones', 'دارای زمان شنود', fa(k.listeningCalls || 0), 'var(--pink)')}
     </div>`;
 
     /* جدول‌های ستون افقی (هیت‌مپ) — تنها نمای معیارها */
@@ -166,7 +166,7 @@ async function render(root) {
             <tr class="agent-row" data-agent="${esc(a.name)}" style="cursor:pointer" title="باز کردن پرونده ${esc(a.name)}">
               <td><span class="cell-main">${esc(a.name)}</span>${a.team ? ` <span class="tag-team">${esc(QCParse.displayTeam(a.team))}</span>` : ''}<div style="font-size:10px;color:var(--muted)">${fa(a.count)} ریت</div></td>
               <td>${a.avg === '' ? '—' : scorePill(a.avg)}</td>
-              ${a.cells.map((c) => `<td style="${heatColor(c ? c.errorRate : null)};text-align:center;border-radius:4px">${heatVal(c)}</td>`).join('')}
+              ${a.cells.map((c) => `<td class="${heatClass(c ? c.errorRate : null)}" style="border-radius:4px">${heatVal(c)}</td>`).join('')}
             </tr>`).join('')}
           </tbody></table></div>
       </div>`;
@@ -189,7 +189,7 @@ async function render(root) {
             <tr class="agent-row" data-agent="${esc(a.name)}" style="cursor:pointer" title="باز کردن پرونده ${esc(a.name)}">
               <td><span class="cell-main">${esc(a.name)}</span>${a.team ? ` <span class="tag-team">${esc(QCParse.displayTeam(a.team))}</span>` : ''}<div style="font-size:10px;color:var(--muted)">${fa(a.formsCount)} فرم</div></td>
               <td>${a.situationalAvg === '' ? '—' : scorePill(a.situationalAvg)}</td>
-              ${a.cells.map((c) => `<td style="${heatColor(c ? c.errorRate : null)};text-align:center;border-radius:4px" title="${c ? fa(c.n) + ' مورد · رعایت ' + fa(c.rate) + '٪' : 'موضوعیت نداشته (n=0)'}">${c ? `${fa(c.errorRate)}٪<div style="font-size:9px;opacity:.75">n=${fa(c.n)}</div>` : '—'}</td>`).join('')}
+              ${a.cells.map((c) => `<td class="${heatClass(c ? c.errorRate : null)}" style="border-radius:4px" title="${c ? fa(c.n) + ' مورد · رعایت ' + fa(c.rate) + '٪' : 'موضوعیت نداشته (n=0)'}">${c ? `${fa(c.errorRate)}٪<div style="font-size:9px;opacity:.75">n=${fa(c.n)}</div>` : '—'}</td>`).join('')}
             </tr>`).join('')}
           </tbody></table></div>
       </div>`;
@@ -221,16 +221,16 @@ async function render(root) {
     const rls = an.redlines || [];
     const redlineSection = `
       <div class="card" style="margin-bottom:16px">
-        <div class="card-head"><div class="head-icon" style="background:rgba(248,113,113,.12);color:#f87171"><i class="fa-solid fa-ban"></i></div>
+        <div class="card-head"><div class="head-icon" style="background:var(--bad-soft);color:var(--bad)"><i class="fa-solid fa-ban"></i></div>
           <div><h3>ردلاین‌ها</h3><div class="sub">${fa(rls.length)} مورد — مرتب‌شده بر اساس جدیدترین</div></div></div>
         <div class="card-pad">
           ${rls.length ? `<div style="display:flex;flex-direction:column;gap:8px">${rls.slice(0, 30).map((r) => `
-            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(248,113,113,.25);border-radius:10px;background:rgba(248,113,113,.05)">
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(248,113,113,.28);border-radius:10px;background:var(--bad-soft)">
               <span class="badge bad" style="margin-top:2px">ردلاین</span>
               <div style="flex:1;font-size:12px">
                 <b class="agent-row" data-agent="${esc(r.expertName)}" style="cursor:pointer;color:var(--brand)">${esc(r.expertName)}</b>
                 <span style="color:var(--muted)"> · ${esc(FORM_FA[r.formType] || r.formType || '—')} · نمره ${r.score != null ? esc(fa(r.score)) : '—'}</span>
-                <div style="color:#fca5a5;margin-top:4px">${esc(r.reason || '(علت ثبت نشده)')}</div>
+                <div style="color:var(--bad);margin-top:4px">${esc(r.reason || '(علت ثبت نشده)')}</div>
                 <div style="font-size:10px;color:var(--muted);margin-top:4px">لید: ${esc(r.leadName || '—')}${r.leadPhone ? ' (' + esc(r.leadPhone) + ')' : ''} · ${esc(r.date || '—')}</div>
               </div>
             </div>`).join('')}</div>
@@ -243,11 +243,11 @@ async function render(root) {
     const cmts = an.comments || [];
     const commentSection = `
       <div class="card">
-        <div class="card-head"><div class="head-icon" style="background:rgba(251,191,36,.12);color:#fbbf24"><i class="fa-solid fa-comment-dots"></i></div>
+        <div class="card-head"><div class="head-icon" style="background:var(--warn-soft);color:var(--warn)"><i class="fa-solid fa-comment-dots"></i></div>
           <div><h3>کامنت‌های کارشناس QC</h3><div class="sub">${fa(cmts.length)} مورد دارای کامنت یا المان ضعیف — نمایش آخرین ۲۵ مورد</div></div></div>
         <div class="card-pad">
           ${cmts.length ? `<div style="display:flex;flex-direction:column;gap:8px">${cmts.slice(0, 25).map((r) => `
-            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(148,163,184,.15);border-radius:10px;">
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line-soft);border-radius:10px;background:var(--panel-2)">
               <div style="flex:1;font-size:12px">
                 <b class="agent-row" data-agent="${esc(r.expertName)}" style="cursor:pointer;color:var(--brand)">${esc(r.expertName)}</b>
                 <span style="color:var(--muted)"> · ${esc(FORM_FA[r.formType] || r.formType || '—')} · نمره ${r.score != null ? esc(fa(r.score)) : '—'}</span>

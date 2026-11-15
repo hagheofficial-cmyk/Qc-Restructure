@@ -69,7 +69,7 @@ App.register('dashboard', {
       const wActive = d.weighted && d.weighted.activeWeight;
       const avgAllTxt = primaryScore === '' ? '—' : fa(primaryScore) + ' <small>از ۱۰۰</small>';
       const avgAllLbl = (d.situationalCount > 0 || d.monthlyTicketCount > 0 || d.monthlySocialCount > 0)
-        ? `نمره کل وزن‌دار${wActive && wActive < 100 ? ` (${fa(wActive)}٪ وزن فعال)` : ' (۴۵/۲۵/۱۵/۱۵)'}`
+        ? `نمره کل وزن‌دار${wActive && wActive < 100 ? ' (بخش‌های دارای دیتا)' : ' (۴۵/۲۵/۱۵/۱۵)'}`
         : 'میانگین کل نمرات';
       const tVal = d.monthlyTicketCount > 0 ? fa(d.monthlyTicketCount) + ' ماهانه' : (d.ticketScored ? fa(d.ticketScored) : '—');
       const sVal = d.monthlySocialCount > 0 ? fa(d.monthlySocialCount) + ' ماهانه' : (d.socialScored ? fa(d.socialScored) : '—');

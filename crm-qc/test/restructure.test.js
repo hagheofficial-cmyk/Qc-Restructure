@@ -929,4 +929,106 @@ test('Call Report imports all registered system specialists on click and proceed
   assert.equal(persisted.length, seedAgents.length, 'Imported specialists are saved to storage');
 });
 
+/* =========================================================================
+ * 12. Full system backup v4, Apps Script favicon, Light Mode polish, and
+ *     clear missing-pillar weighted score (Social=100, Ticket=100 -> 100)
+ * ========================================================================= */
+test('Full backup v4 restores all datasets incl. fiscalMonths/lists/qcUsers/elements + Apps Script favicon + Light Mode + weighted score rule', async (t) => {
+  const vm = require('vm');
+  // (A) User's exact weighted score example: Social=100, Ticket=100, Call=missing, Situational=missing -> 100
+  const wOnlyTS = R.computeWeightedScore({ callAvg: '', situationalAvg: '', socialAvg: 100, ticketAvg: 100 });
+  assert.equal(wOnlyTS.score, 100);
+  assert.equal(wOnlyTS.activeWeight, 30);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'callFixed').active, false);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'situational').active, false);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'social').active, true);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'ticket').active, true);
+
+  // (B) Full v4 backup restore preserves fiscalMonths, lists, elements, qcUsers, actions, reminders, situational & monthlyScores
+  const db = makeSeedDb();
+  const fullBackup = {
+    schema: 'crm-qc-backup', version: 4, datasetId: 'ds-v4-test', exportedAt: '2026-11-14T10:00:00Z',
+    range: { from: null, to: null },
+    settings: Object.assign({}, db.settings, { orgName: 'نسخه منتقل‌شده' }),
+    lists: { teams: ['Tele sales', 'Account', 'CustomTeam'], messengers: ['تلگرام', 'واتساپ'] },
+    agents: db.agents.slice(0, 5),
+    qcAgents: ['QC الف'],
+    qcUsers: [{ id: 1, name: 'مدیر اصلی', password: 'h:test', role: 'admin', active: true }],
+    fiscalMonths: [{ id: 'fm-1', name: 'آبان ۱۴۰۵', from: '1405/07/26', to: '1405/08/25', note: '' }],
+    elements: [{ scope: 'call', team: 'Tele sales', form: 'tele', key: 'k1', label: 'المان تست', excelKey: 'k1', active: true }],
+    agentActions: { [db.agents[0].name]: [{ id: 1, title: 'کال‌کوتچینگ', date: '1405/08/01', status: 'open', note: 'پیگیری' }] },
+    actionTypes: ['کال‌کوتچینگ'],
+    reminders: [{ id: 1, agent: db.agents[0].name, date: '1405/08/10', text: 'یادآور تست', done: false }],
+    tickets: [], socials: [], callFeedbacks: [],
+    callSituational: [{ syncId: 's1', expertName: db.agents[0].name, team: 'Tele sales', formType: 'tele', periodFrom: '1405/08/01', periodTo: '1405/08/20', formsCount: 5, situationalScore: 88, elements: {} }],
+    monthlyScores: [{ syncId: 'm1', channel: 'ticket', expertName: db.agents[0].name, team: 'Tele sales', periodFrom: '1405/08/01', periodTo: '1405/08/20', score: 95, evalCount: 10 }]
+  };
+  const restored = I.restore(db, fullBackup, 'replace');
+  assert.equal(restored.ok, true);
+  assert.equal(restored.restored.fiscalMonths, 1);
+  assert.equal(restored.restored.qcUsers, 1);
+  assert.equal(restored.restored.actions, 1);
+  assert.equal(restored.restored.reminders, 1);
+  assert.deepEqual(db.lists.teams, ['Tele sales', 'Account', 'CustomTeam']);
+  assert.equal(db.fiscalMonths[0].name, 'آبان ۱۴۰۵');
+  assert.equal(db.elements[0].label, 'المان تست');
+  assert.equal(db.qcUsers[0].name, 'مدیر اصلی');
+
+  // (C) Light Mode CSS checks (no dark table-row hover or black iframe background in light mode)
+  const stylesCss = fs.readFileSync(path.join(ROOT, 'public/styles.css'), 'utf8');
+  const enhCss = fs.readFileSync(path.join(ROOT, 'public/enhancements.css'), 'utf8');
+  const crThemeCss = fs.readFileSync(path.join(ROOT, 'public/callReportTheme.css'), 'utf8');
+  const callAnJs = fs.readFileSync(path.join(ROOT, 'public/pages/callAnalysis.js'), 'utf8');
+  const portJs = fs.readFileSync(path.join(ROOT, 'public/pages/portfolio.js'), 'utf8');
+  assert.ok(stylesCss.includes('.tbl tbody tr:hover { background: var(--row-hover); }'));
+  assert.equal(stylesCss.includes('background:#0b1220'), false);
+  assert.ok(enhCss.includes('--row-hover:rgba(2,116,179,.08)'));
+  assert.ok(crThemeCss.includes('html[data-theme="light"] tbody tr:hover td'));
+  assert.equal(callAnJs.includes('rgba(30,41,59'), false);
+  assert.ok(portJs.includes('دیتایی موجود نیست'));
+  assert.equal(portJs.includes('نرمال‌شده روی'), false);
+
+  // (D) Apps Script Server.gs sets repo logo favicon via setFaviconUrl by default
+  const codeGs = fs.readFileSync(path.join(ROOT, 'apps-script-full/Code.gs'), 'utf8');
+  const props = { QC_GAS_SPREADSHEET_ID: 'sheet-1' };
+  const ctx = {
+    console,
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null }) },
+    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/test/exec' }) },
+    HtmlService: {
+      createHtmlOutput: v => ({ content: v, setTitle() { return this; }, addMetaTag() { return this; }, setFaviconUrl(u) { this.favicon = u; return this; } }),
+      createHtmlOutputFromFile: n => ({ getContent: () => `<html>${n}</html>` })
+    }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(codeGs, ctx, { filename: 'Code.gs', timeout: 10000 });
+  const outDefault = ctx.doGet({});
+  assert.ok(outDefault.favicon && outDefault.favicon.includes('hagheofficial-cmyk/Qc-Restructure') && outDefault.favicon.endsWith('/favicon.png'));
+  props.QC_GAS_FAVICON_URL = 'https://example.com/custom-logo.png';
+  const outCustom = ctx.doGet({});
+  assert.equal(outCustom.favicon, 'https://example.com/custom-logo.png');
+
+  // (D2) CallReport.html built by build-apps-script embeds project favicon data URI
+  const callRepBuilt = fs.readFileSync(path.join(ROOT, 'apps-script-full/CallReport.html'), 'utf8');
+  assert.ok(callRepBuilt.includes('rel="icon" type="image/png" href="data:image/png;base64,'), 'CallReport.html embeds base64 favicon');
+
+  // (E) Global quick backup button renders, opens modal cleanly, and Light Mode toggle works
+  const env = browser('public', db);
+  const { w, dom, errors } = env;
+  t.after(() => dom.window.close());
+  await w.App.boot();
+  w.App.bindDateRangeUI();
+  w.App.bindChrome();
+  const qbBtn = w.document.getElementById('quickBackupBtn');
+  assert.ok(qbBtn, 'quickBackupBtn must exist in topbar');
+  qbBtn.click();
+  assert.ok(w.document.getElementById('qbDownloadBtn'), 'Quick backup download button opens inside modal');
+  assert.ok(w.document.getElementById('qbPickBtn'), 'Quick backup upload button opens inside modal');
+  // Toggle theme to Light Mode without JS errors
+  w.App.applyTheme('light');
+  assert.equal(w.document.documentElement.dataset.theme, 'light');
+  assert.equal(errors.length, 0);
+});
+
+
 

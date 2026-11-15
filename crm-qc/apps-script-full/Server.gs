@@ -108,10 +108,10 @@ var QC_GAS_ANALYSIS_MAX_CHARS = 900000;
 var QC_GAS_TOKEN_PREFIX = 'qctok@';
 var QC_GAS_TOKEN_EPOCH_KEY = 'QC_GAS_TOKEN_EPOCH';
 var QC_GAS_TOKEN_TTL_SEC = 21600; // ۶ ساعت؛ با هر درخواست تمدید می‌شود
-/* آیکون سربرگ مرورگر (favicon). اگر خواستید لوگوی دیگری بگذارید، این مقدار را
- * در Script Properties با کلید QC_GAS_FAVICON_URL تنظیم کنید. */
+/* آیکون سربرگ مرورگر (favicon). به‌صورت پیش‌فرض روی لوگوی رسمی سامانه تنظیم است؛
+ * برای لوگوی اختصاصی دیگر می‌توانید کلید QC_GAS_FAVICON_URL را در Script Properties قرار دهید. */
 var QC_GAS_FAVICON_KEY = 'QC_GAS_FAVICON_URL';
-var QC_GAS_FAVICON_FALLBACK = 'https://raw.githubusercontent.com/hagheofficial-cmyk/Sheettohtml/arena/865b3375-sheettohtml/crm-qc/public/favicon.png';
+var QC_GAS_FAVICON_FALLBACK = 'https://raw.githubusercontent.com/hagheofficial-cmyk/Qc-Restructure/2560d822c5cf01268aed0072ae0f6b0b86864ade/crm-qc/public/favicon.png';
 
 function onOpen() {
   try {
@@ -232,10 +232,10 @@ function crmqcOnSheetChange_() {
 function doGet(e) {
   var id = PropertiesService.getScriptProperties().getProperty(QC_GAS_ID_KEY);
   if (!id) {
-    return HtmlService.createHtmlOutput(
+    return withFavicon_(HtmlService.createHtmlOutput(
       '<meta charset="utf-8"><div dir="rtl" style="font:16px sans-serif;padding:32px">' +
       '<h2>سامانه هنوز راه‌اندازی نشده است</h2><p>در Apps Script تابع <code>setupStandaloneApp_</code> را از شیت مقصد اجرا و سپس Deploy کنید.</p></div>'
-    ).setTitle('راه‌اندازی سامانه QC');
+    ).setTitle('راه‌اندازی سامانه QC'));
   }
 
   // Placeholder replacement (not HtmlService templates) keeps the bundled
@@ -280,7 +280,7 @@ function faviconUrl_() {
     var custom = PropertiesService.getScriptProperties().getProperty(QC_GAS_FAVICON_KEY);
     if (custom) return custom;
   } catch (err) {}
-  return '';
+  return QC_GAS_FAVICON_FALLBACK;
 }
 
 function withFavicon_(output) {
@@ -395,6 +395,9 @@ function crmqcApi(method, requestUrl, body, token) {
         // Reads must not persist: a GET only re-derives in-memory defaults, and
         // writing from a cached snapshot could clobber a concurrent edit.
         var payload = jsonSafe_(result);
+        if (pathOnly === '/api/backup' && payload && typeof payload === 'object') {
+          try { payload.callReportStorage = readCallReportSettings_(); } catch (ignored) {}
+        }
         if (pathOnly === '/api/bootstrap' && payload && payload.counts) {
           var loaded = readInfo.loaded || [];
           var fullCounts = loaded.indexOf('tickets') >= 0 && loaded.indexOf('socials') >= 0 &&
@@ -439,6 +442,28 @@ function crmqcApi(method, requestUrl, body, token) {
        * writeDatabaseDiffFp_ سپرده شد. */
       if (window.__GAS_DB_DIRTY__) markSelfWrite_();
       var changedTabs = writeDatabaseDiffFp_(ss, beforeJson, live, false, readInfo.loaded);
+      /* در بازیابی بک‌اپ کامل، تنظیمات ذخیره‌شده‌ی گزارش تماس نیز بازیابی می‌شوند. */
+      if (pathOnly === '/api/backup' && method === 'POST') {
+        var bSrc = (body && body.backup) || body || {};
+        if (bSrc && bSrc.callReportStorage && typeof bSrc.callReportStorage === 'object') {
+          Object.keys(QC_GAS_CALL_REPORT_KEYS).forEach(function (crKey) {
+            if (bSrc.callReportStorage[crKey] == null) return;
+            var crText = typeof bSrc.callReportStorage[crKey] === 'string'
+              ? bSrc.callReportStorage[crKey] : JSON.stringify(bSrc.callReportStorage[crKey]);
+            try {
+              if (crText) JSON.parse(crText);
+              var crSheet = ss.getSheetByName(QC_GAS_CALL_REPORT_KEYS[crKey]);
+              if (crSheet) {
+                markSelfWrite_();
+                var crVals = crText ? [['json'], [crText]] : [['json']];
+                crSheet.clearContents();
+                crSheet.getRange(1, 1, crVals.length, 1).setValues(crVals);
+                styleHeader_(crSheet, 1);
+              }
+            } catch (ignored) {}
+          });
+        }
+      }
       /* فقط همان تب‌ها نسخهٔ تازه می‌گیرند؛ بقیهٔ کش گرم می‌ماند و bootstrap
        * بعدی (که کلاینت پس از هر ذخیره می‌زند) هیچ تبی را از شیت نمی‌خواند. */
       var responseRevision = currentRevision_();

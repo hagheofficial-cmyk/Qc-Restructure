@@ -192,10 +192,13 @@ async function render(root) {
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));margin-bottom:16px">
     <div class="card">
       <div class="card-head">
-        <div class="head-icon" style="background:rgba(52,211,153,.12);color:#34d399"><i class="fa-solid fa-file-import"></i></div>
-        <div><h3>بک‌اپ کامل سامانه</h3><div class="sub">دانلود همه دیتا (تیکت، سوشال، تماس، کارشناس‌ها، تنظیمات) به‌صورت فایل JSON</div></div>
+        <div class="head-icon" style="background:var(--good-soft);color:var(--good)"><i class="fa-solid fa-file-import"></i></div>
+        <div><h3>بک‌اپ کامل سامانه (انتقال به نسخه جدید)</h3><div class="sub">دانلود یکجای همه دیتا (تیکت، سوشال، تماس ثابت و موقعیتی، نمرات ماهانه، کارشناسان، اقدامات، ماه‌های مالی، کاربران و تنظیمات)</div></div>
       </div>
       <div class="card-pad" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn primary" id="btnBackupAll"><i class="fa-solid fa-cloud-arrow-down"></i> دانلود فوری بکاپ کامل همه داده‌ها (یک کلیک)</button>
+        </div>
         <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
           <div class="field"><label>از تاریخ (اختیاری)</label>
             <div class="date-f"><input class="input" id="bupFrom" dir="ltr" style="text-align:right;padding-left:34px" inputmode="numeric" placeholder="۱۴۰۵/۰۱/۰۱">
@@ -209,24 +212,24 @@ async function render(root) {
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input class="input" id="backupYear" inputmode="numeric" dir="ltr" style="width:90px" value="${C.todayJalali().jy}" aria-label="سال بک اپ">
           <select class="input" id="backupMonth" style="width:125px" aria-label="ماه بک اپ">${C.MONTHS_FA.map((name,index)=>`<option value="${index+1}" ${index+1===C.todayJalali().jm?'selected':''}>${name}</option>`).join('')}</select>
           <button class="btn soft" id="backupMonthSet">انتخاب کل ماه</button><button class="btn ghost" id="backupUseGlobal">استفاده از بازه گزارش</button></div>
-        <div class="note" style="margin:0"><i class="fa-solid fa-circle-info"></i> اگر تاریخ نزنی، کل دیتا دانلود می‌شود. با تاریخ فقط رکوردهای آن بازه.</div>
+        <div class="note" style="margin:0"><i class="fa-solid fa-circle-info"></i> برای انتقال به نسخه جدید کد، دکمه آبی «دانلود فوری بکاپ کامل» را بزنید تا کل داده‌های سامانه یکجا ذخیره شوند.</div>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn success-soft" id="btnBackup"><i class="fa-solid fa-floppy-disk"></i> دانلود فایل بک‌اپ</button>
+          <button class="btn success-soft" id="btnBackup"><i class="fa-solid fa-floppy-disk"></i> دانلود فایل بک‌اپ (با فیلتر تاریخ بالا)</button>
         </div>
       </div>
     </div>
 
     <div class="card">
       <div class="card-head">
-        <div class="head-icon" style="background:rgba(251,191,36,.12);color:#fbbf24"><i class="fa-solid fa-file-export"></i></div>
-        <div><h3>بازیابی / ایمپورت دیتا</h3><div class="sub">فایل بک‌اپ JSON که قبلاً از همین‌جا دانلود کردی</div></div>
+        <div class="head-icon" style="background:var(--warn-soft);color:var(--warn)"><i class="fa-solid fa-file-export"></i></div>
+        <div><h3>بازیابی / آپلود روی نسخه جدید</h3><div class="sub">فایل بک‌اپ JSON که از نسخه قبلی دانلود کرده‌اید را اینجا آپلود کنید</div></div>
       </div>
       <div class="card-pad" style="display:flex;flex-direction:column;gap:12px">
         <div class="note" style="margin:0">
           <i class="fa-solid fa-circle-info"></i>
-          <span>فایل <b>بک‌اپ کامل</b> سامانه را انتخاب کنید — کل دیتای مرکز (تیکت، سوشال، ریت تماس) با آن جایگزین یا ادغام می‌شود.</span>
+          <span>فایل <b>بک‌اپ کامل</b> سامانه را انتخاب کنید — همه داده‌ها (تیکت، سوشال، ریت تماس ثابت و موقعیتی، نمرات ماهانه، کارشناسان، اقدامات، یادآورها، ماه‌های مالی، کاربران QC و تنظیمات) یکجا بازیابی یا ادغام می‌شوند.</span>
         </div>
-        <button class="btn soft" id="btnRestoreSel"><i class="fa-solid fa-file-arrow-up" style="color:#14b8a6"></i> انتخاب فایل بازیابی…</button>
+        <button class="btn soft" id="btnRestoreSel"><i class="fa-solid fa-file-arrow-up"></i> انتخاب و آپلود فایل بکاپ…</button>
         <input type="file" id="restoreInp" accept=".json,application/json" hidden>
         <div id="restoreResult" style="display:none;font-size:12px;padding:9px 12px;border-radius:9px"></div>
       </div>
@@ -342,7 +345,7 @@ async function render(root) {
     const resEl = $('#upResult');
     if (!payload.length) {
       resEl.style.display = '';
-      resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = '#f87171';
+      resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = 'var(--bad)';
       resEl.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> هیچ فایلی خوانده نشد — ${esc((errs || []).join('، '))}`;
       return false;
     }
@@ -363,22 +366,22 @@ async function render(root) {
       const kindFa = (k) => k === 'situational' ? 'موقعیتی' : (k === 'ticket_monthly' ? 'ماهانه تیکت' : (k === 'social_monthly' ? 'ماهانه پیام‌رسان' : 'ثابت'));
       resEl.style.display = '';
       if (okF.length) {
-        resEl.style.background = 'rgba(52,211,153,.08)'; resEl.style.color = '#34d399';
+        resEl.style.background = 'rgba(52,211,153,.08)'; resEl.style.color = 'var(--ok)';
         resEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> آپلود موفق: ` +
           okF.map((x) => {
             const rangeTxt = (x.periodFrom || x.periodTo) ? ` · بازه: ${fa(x.periodFrom || '—')} تا ${fa(x.periodTo || '—')}` : '';
             return `${esc(x.name)} → ${fa(x.count)} ردیف ${kindFa(x.kind)} (${formFa[x.type] || x.type}${rangeTxt})`;
           }).join(' | ');
       } else {
-        resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = '#f87171';
+        resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = 'var(--bad)';
         resEl.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> هیچ ردیف معتبری وارد نشد.`;
       }
       if (badF.length || (errs && errs.length)) {
-        resEl.innerHTML += `<div style="margin-top:7px;color:#fbbf24;font-size:11px"><i class="fa-solid fa-triangle-exclamation"></i> نادیده‌گرفته: ${esc([...badF.map((x) => x.name + ' (' + (x.reason || 'نامعتبر') + ')'), ...(errs || [])].join('، '))}</div>`;
+        resEl.innerHTML += `<div style="margin-top:7px;color:var(--warn);font-size:11px"><i class="fa-solid fa-triangle-exclamation"></i> نادیده‌گرفته: ${esc([...badF.map((x) => x.name + ' (' + (x.reason || 'نامعتبر') + ')'), ...(errs || [])].join('، '))}</div>`;
       }
       const unlinkedSit = okF.filter((x) => x.kind === 'situational' && !x.periodFrom && !x.periodTo);
       if (unlinkedSit.length) {
-        resEl.innerHTML += `<div style="margin-top:7px;color:#fbbf24;font-size:11.5px"><i class="fa-solid fa-circle-info"></i> فایل موقعیتی بدون بازه تاریخ ثبت شد؛ برای نمایش در بازه‌ی ماهانه، فایل ثابت هم‌تیم را هم آپلود کنید یا بازه‌ی گزارش را روی «همه تاریخ‌ها» بگذارید.</div>`;
+        resEl.innerHTML += `<div style="margin-top:7px;color:var(--warn);font-size:11.5px"><i class="fa-solid fa-circle-info"></i> فایل موقعیتی بدون بازه تاریخ ثبت شد؛ برای نمایش در بازه‌ی ماهانه، فایل ثابت هم‌تیم را هم آپلود کنید یا بازه‌ی گزارش را روی «همه تاریخ‌ها» بگذارید.</div>`;
       }
       const added = okF.reduce((n, x) => n + (x.changes ? (x.changes.added || 0) : x.count), 0);
       const updated = okF.reduce((n, x) => n + (x.changes ? (x.changes.updated || 0) : 0), 0);
@@ -785,6 +788,15 @@ async function render(root) {
   $('#backupUseGlobal',root).addEventListener('click',()=>{$('#bupFrom').value=App.dateRange.from;$('#bupTo').value=App.dateRange.to;});
 
   /* ------- بک‌اپ کامل ------- */
+  $('#btnBackupAll').addEventListener('click', async () => {
+    const b = $('#btnBackupAll'); b.disabled = true;
+    try {
+      const data = await App.downloadFullBackup();
+      toast.success(`بکاپ کامل دانلود شد — ${fa((data.agents || []).length)} کارشناس / ${fa((data.tickets || []).length)} تیکت / ${fa((data.socials || []).length)} سوشال / ${fa((data.callFeedbacks || []).length)} تماس ثابت / ${fa((data.callSituational || []).length)} موقعیتی / ${fa((data.monthlyScores || []).length)} نمره ماهانه`);
+    } catch (e) { toast.error(e.message); }
+    b.disabled = false;
+  });
+
   $('#btnBackup').addEventListener('click', async () => {
     const b = $('#btnBackup'); b.disabled = true;
     try {
@@ -793,16 +805,7 @@ async function render(root) {
       const fromJ=C.parseDate(rawRange.from),toJ=C.parseDate(rawRange.to);
       const from = fromJ ? C.formatJalali(fromJ) : '';
       const to = toJ ? C.formatJalali(toJ) : '';
-      const qs = (from || to) ? '?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) : '';
-      const data = await api.get('/api/backup' + qs);
-      const dateStr = (data.exportedAt || '').slice(0, 10).replace(/-/g, '');
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `crm-qc-backup-${from?from.replaceAll('/','-'):'all'}_${to?to.replaceAll('/','-'):dateStr}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const data = await App.downloadFullBackup({ from, to });
       toast.success(`بک‌اپ دانلود شد — ${fa(data.agents.length)} کارشناس / ${fa(data.tickets.length)} تیکت / ${fa(data.socials.length)} سوشال / ${fa((data.callFeedbacks || []).length)} تماس`);
     } catch (e) { toast.error(e.message); }
     b.disabled = false;
@@ -822,14 +825,15 @@ async function render(root) {
         if (!isBackup && !isRecovery) throw new Error('این فایل بک‌اپ سامانه یا فایل بازیابی پنل ریت نیست');
         const resEl = $('#restoreResult');
         resEl.style.display = '';
-        const summary=isBackup ? `${(obj.tickets||[]).length} تیکت، ${(obj.socials||[]).length} سوشال، ${(obj.callFeedbacks||[]).length} ریت تماس · بازه ${obj.range&&obj.range.from||'ابتدا'} تا ${obj.range&&obj.range.to||'انتها'}` : `${(obj.teleRawData||[]).length+(obj.accRawData||[]).length+(obj.mlmRawData||[]).length} ریت تماس`;
-        const mode=await UI.confirmImport(isBackup?'ورود آرشیو / بک‌اپ':'ورود فایل ریت',summary,isBackup?'تمام دیتای فعلیِ تیکت، سوشال، تماس و فهرست کارشناسان/تنظیمات با محتویات این بک‌اپ جایگزین می‌شود.':'فقط ریت‌های منبع qc_recovery.json جایگزین می‌شوند؛ سایر منابع محفوظ‌اند.');
+        const summary=isBackup ? `${(obj.agents||[]).length} کارشناس، ${(obj.tickets||[]).length} تیکت، ${(obj.socials||[]).length} سوشال، ${(obj.callFeedbacks||[]).length} تماس ثابت، ${(obj.callSituational||[]).length} موقعیتی، ${(obj.monthlyScores||[]).length} نمره ماهانه · بازه ${obj.range&&obj.range.from||'ابتدا'} تا ${obj.range&&obj.range.to||'انتها'}` : `${(obj.teleRawData||[]).length+(obj.accRawData||[]).length+(obj.mlmRawData||[]).length} ریت تماس`;
+        const mode=await UI.confirmImport(isBackup?'ورود آرشیو / بک‌اپ کامل':'ورود فایل ریت',summary,isBackup?'تمام دیتای فعلی سامانه (تیکت، سوشال، تماس ثابت و موقعیتی، نمرات ماهانه، کارشناسان، اقدامات، ماه‌های مالی و تنظیمات) با محتویات این بک‌اپ جایگزین می‌شود.':'فقط ریت‌های منبع qc_recovery.json جایگزین می‌شوند؛ سایر منابع محفوظ‌اند.');
         if(!mode){resEl.textContent='عملیات لغو شد؛ دیتای فعلی تغییر نکرد.';return;}
         try {
           const r=isBackup?await api.post('/api/backup',{backup:obj,mode}):await api.post('/api/calls',{recovery:obj,mode});
+          if (isBackup && obj.callReportStorage && App.applyBrowserCallReportStorage) App.applyBrowserCallReportStorage(obj.callReportStorage);
           if(!root.isConnected)return;
           resEl.style.background='var(--good-soft)';resEl.style.color='var(--good)';
-          resEl.textContent=isBackup?`${mode==='append'?'ادغام':'جایگزینی'} موفق — اکنون ${r.restored.tickets} تیکت، ${r.restored.socials} سوشال، ${r.restored.calls} ریت تماس و ${r.restored.agents} کارشناس موجود است.`:'ورود ریت با روش انتخاب‌شده انجام شد.';
+          resEl.textContent=isBackup?`${mode==='append'?'ادغام':'جایگزینی'} موفق — اکنون ${r.restored.tickets} تیکت، ${r.restored.socials} سوشال، ${r.restored.calls} تماس ثابت، ${r.restored.callSituational || 0} موقعیتی، ${r.restored.monthlyScores || 0} نمره ماهانه و ${r.restored.agents} کارشناس موجود است.`:'ورود ریت با روش انتخاب‌شده انجام شد.';
           toast.success(mode==='append'?'داده اضافه شد؛ آرشیو قبلی محفوظ است':'داده با تأیید شما جایگزین شد');
           await App.boot();await loadStatus();loadFiles();
         } catch(error){resEl.style.color='var(--bad)';resEl.textContent='خطا: '+error.message;}

@@ -1,23 +1,103 @@
 
-/* حالت روشن ابزار مستقل؛ داده/دسترسی تیم‌ها تغییر نمی‌کند.
-   رنگ‌های تیره‌ی صفحه به متغیرهای --cr-* وصل‌اند (مقدار پیش‌فرض = حالت تیره)،
-   و اینجا پالت روشن ملایم (کمتر سفید، کمتر خیرگی) تعریف می‌شود. */
+/* حالت روشن ابزار مستقل گزارش تماس؛ داده و دسترسی تیم‌ها تغییر نمی‌کند.
+   تمامی سطوح، جدول‌ها، هاورها، فیلترها، مودال‌ها و نشانگرها برای حالت روشن بهینه‌سازی شده‌اند. */
 html[data-theme="light"] {
   color-scheme:light;
-  --cr-bg-deep:#e4eaf3; --cr-panel:#f3f6fb; --cr-panel-2:#e9eff7; --cr-line:#bccbdd; --cr-hover:#d6e2f0;
-  --cr-ink-strong:#14263e; --cr-ink:#1c2c42; --cr-ink-2:#3a4e69; --cr-muted:#5a6e89;
+  --cr-bg-deep:#edf2f8; --cr-panel:#ffffff; --cr-panel-2:#f4f7fc; --cr-line:#c5d4e6; --cr-hover:#dceaf8;
+  --cr-ink-strong:#14263e; --cr-ink:#1c2c42; --cr-ink-2:#334863; --cr-muted:#5a6f8a;
 }
-html[data-theme="light"] body { background:#e4eaf3;color:#1c2c42; }
-html[data-theme="light"] header,html[data-theme="light"] .step-panel,html[data-theme="light"] .dashboard-card,html[data-theme="light"] .stat-card,html[data-theme="light"] .modal-content { background:#f3f6fb;color:#1c2c42;border-color:#bccbdd;box-shadow:0 10px 28px rgba(28,52,88,.10); }
-html[data-theme="light"] h1 { background:none;color:#14263e;-webkit-text-fill-color:#14263e; }
-html[data-theme="light"] .step-title,html[data-theme="light"] h2,html[data-theme="light"] h3 { color:#095f8c; }
-html[data-theme="light"] table,html[data-theme="light"] tbody,html[data-theme="light"] td { background:#f3f6fb;color:#1c2c42;border-color:#cfdae8; }
-html[data-theme="light"] th { background:#e1e9f4;color:#3a4e69;border-color:#cfdae8; }
-html[data-theme="light"] .input-inline,html[data-theme="light"] textarea,html[data-theme="light"] input,html[data-theme="light"] select { background:#e9eff7;color:#1c2c42;border-color:#bccbdd; }
-html[data-theme="light"] .upload-area,html[data-theme="light"] .tab-btn.active,html[data-theme="light"] .compact-batch-box,html[data-theme="light"] .btn-secondary { background:#e1e9f4;color:#3a4e69;border-color:#bccbdd; }
-html[data-theme="light"] .time-range-box,html[data-theme="light"] .filter-box { background:#e1e9f4;color:#1c2c42; }
-html[data-theme="light"] #quickMenuPanel,html[data-theme="light"] .menu-tab-btn,html[data-theme="light"] #quickMenuPanel .btn { background:#f3f6fb !important;color:#1c2c42 !important;border-color:#bccbdd !important; }
-html[data-theme="light"] .menu-tab-btn:hover { background:#d6e2f0 !important;color:#14263e !important; }
-html[data-theme="light"] .card,html[data-theme="light"] .filters-bar,html[data-theme="light"] .chart-container { background:#f3f6fb;color:#1c2c42;border-color:#bccbdd; }
-html[data-theme="light"] .upload-area:hover,html[data-theme="light"] .col-top-btn { background:#e1e9f4;color:#3a4e69; }
-html[data-theme="light"] .col-top-btn.active { background:#d6e2f0;color:#14263e; }
+html[data-theme="light"] body { background:linear-gradient(135deg,#edf2f8 0%,#e2ebf6 100%); color:#1c2c42; }
+html[data-theme="light"] header,
+html[data-theme="light"] .step-panel,
+html[data-theme="light"] .dashboard-card,
+html[data-theme="light"] .stat-card,
+html[data-theme="light"] .modal-content,
+html[data-theme="light"] #executiveDashboardContainer,
+html[data-theme="light"] #tableContainer,
+html[data-theme="light"] .progress-box {
+  background:#ffffff; color:#1c2c42; border-color:#c5d4e6; box-shadow:0 8px 24px rgba(20,38,62,.08);
+}
+html[data-theme="light"] h1 { background:none; color:#14263e; -webkit-text-fill-color:#14263e; }
+html[data-theme="light"] .step-title,
+html[data-theme="light"] h2,
+html[data-theme="light"] h3,
+html[data-theme="light"] .chart-container h3 { color:#036298; }
+html[data-theme="light"] .results-table-wrap,
+html[data-theme="light"] .expert-table-wrap { background:#ffffff; border-color:#c5d4e6; }
+html[data-theme="light"] table,
+html[data-theme="light"] tbody,
+html[data-theme="light"] td { background:#ffffff; color:#1c2c42; border-color:#dce6f1; }
+html[data-theme="light"] tbody tr:hover td { background:#eef6fd !important; color:#14263e; }
+html[data-theme="light"] th { background:#eaf0f8; color:#2b405c; border-color:#c5d4e6; }
+html[data-theme="light"] #resultsTable th.sortable:hover { background:#d6e7f7 !important; color:#0f243d !important; }
+html[data-theme="light"] #resultsTable th.sortable.active { background:#0274b3 !important; color:#ffffff !important; }
+html[data-theme="light"] .input-inline,
+html[data-theme="light"] textarea,
+html[data-theme="light"] input,
+html[data-theme="light"] select { background:#ffffff; color:#1c2c42; border-color:#c5d4e6; }
+html[data-theme="light"] .input-inline::placeholder,
+html[data-theme="light"] textarea::placeholder { color:#7a8fa9; }
+html[data-theme="light"] .upload-area,
+html[data-theme="light"] .compact-batch-box,
+html[data-theme="light"] .btn-secondary { background:#eef4fb; color:#2b405c; border-color:#b7cbe0; box-shadow:none; }
+html[data-theme="light"] .btn-secondary:hover { background:#e0ebf7; color:#14263e; }
+html[data-theme="light"] .btn-danger { background:rgba(190,31,54,.10); color:#be1f36; border-color:rgba(190,31,54,.4); }
+html[data-theme="light"] .tab-btn { color:#5a6f8a; }
+html[data-theme="light"] .tab-btn:hover { color:#14263e; background:#eef4fb; }
+html[data-theme="light"] .tab-btn.active { background:#ffffff; color:#0274b3; border-color:#0274b3; box-shadow:0 2px 8px rgba(2,116,179,.12); }
+html[data-theme="light"] .time-range-box,
+html[data-theme="light"] .filter-box { background:#eef4fb; color:#1c2c42; border-color:#c5d4e6; }
+html[data-theme="light"] .multi-select-btn { background:#ffffff; color:#1c2c42; border-color:#c5d4e6; }
+html[data-theme="light"] .multi-select-dropdown { background:#ffffff; border-color:#0274b3; box-shadow:0 14px 32px rgba(20,38,62,.16); }
+html[data-theme="light"] .select-actions { border-bottom-color:#dce6f1; }
+html[data-theme="light"] .select-actions a { color:#0274b3; }
+html[data-theme="light"] .checkbox-item { color:#1c2c42; }
+html[data-theme="light"] .badge-team { background:rgba(2,116,179,.12); color:#036298; }
+html[data-theme="light"] .badge-subteam { background:rgba(99,60,194,.12); color:#5b35b5; }
+html[data-theme="light"] select.attendance-select { background:#fffbeb; border-color:#d97706; color:#92400e; }
+html[data-theme="light"] .task-inline-input { background:#f5f3ff; border-color:#a78bfa; color:#4c1d95; }
+html[data-theme="light"] .shift-badge { background:rgba(2,132,199,.10); border-color:#0284c7; color:#0369a1; }
+html[data-theme="light"] .shift-badge.custom { background:rgba(217,119,6,.12); border-color:#d97706; color:#92400e; }
+html[data-theme="light"] .start-time-control { background:#fffbeb; border-color:#d97706; }
+html[data-theme="light"] .start-time-control label { color:#92400e; }
+html[data-theme="light"] .start-time-control input[type="time"] { background:#ffffff; color:#92400e; border-color:#d97706; }
+html[data-theme="light"] .start-time-control .hint-late { color:#be1f36; }
+html[data-theme="light"] .success { color:#047251; }
+html[data-theme="light"] #systemAgentsQuickBox { background:linear-gradient(135deg,rgba(2,116,179,.09),rgba(4,114,81,.07)) !important; border-color:rgba(2,116,179,.32) !important; }
+html[data-theme="light"] #step2SystemBanner { background:rgba(4,114,81,.10) !important; border-color:rgba(4,114,81,.35) !important; color:#065f46 !important; }
+html[data-theme="light"] #quickMenuPanel,
+html[data-theme="light"] .menu-tab-btn,
+html[data-theme="light"] #quickMenuPanel .btn { background:#ffffff !important; color:#1c2c42 !important; border-color:#c5d4e6 !important; }
+html[data-theme="light"] #quickMenuPanel { box-shadow:0 16px 40px rgba(20,38,62,.18) !important; }
+html[data-theme="light"] .menu-tab-btn:hover,
+html[data-theme="light"] #quickMenuPanel .btn:hover { background:#eaf2fb !important; color:#14263e !important; border-color:#90b4d8 !important; }
+html[data-theme="light"] .menu-tab-btn.active { background:#0274b3 !important; color:#ffffff !important; border-color:#0274b3 !important; }
+html[data-theme="light"] #quickMenuPanel .btn-warning { background:#fffbeb !important; color:#92400e !important; border-color:#d97706 !important; }
+html[data-theme="light"] .card,
+html[data-theme="light"] .filters-bar,
+html[data-theme="light"] .chart-container { background:#ffffff; color:#1c2c42; border-color:#c5d4e6; box-shadow:0 4px 16px rgba(20,38,62,.06); }
+html[data-theme="light"] .card .sub-metric { color:#0274b3; }
+html[data-theme="light"] .upload-area:hover,
+html[data-theme="light"] .col-top-btn { background:#eef4fb; color:#334863; border-color:#c5d4e6; }
+html[data-theme="light"] .col-top-btn:hover { color:#14263e; border-color:#7aa3cc; }
+html[data-theme="light"] .col-top-btn.active { background:#dceaf8; color:#0f243d; border-color:#0274b3; }
+html[data-theme="light"] .col-top-btn.active[data-col="first"]  { background:rgba(2,116,179,.12); border-color:#0274b3; color:#036298; }
+html[data-theme="light"] .col-top-btn.active[data-col="reason"] { background:rgba(180,104,6,.13); border-color:#d97706; color:#92400e; }
+html[data-theme="light"] .col-top-btn.active[data-col="task"]   { background:rgba(99,60,194,.12); border-color:#7c3aed; color:#5b21b6; }
+html[data-theme="light"] .col-top-btn.active[data-col="shift"]  { background:rgba(2,132,199,.12); border-color:#0284c7; color:#0369a1; }
+html[data-theme="light"] #progressOverlay,
+html[data-theme="light"] #defaultShiftModal { background:rgba(20,38,62,.42); }
+html[data-theme="light"] [style*="color:#94a3b8"] { color:#5a6f8a !important; }
+html[data-theme="light"] [style*="color:#cbd5e1"] { color:#334863 !important; }
+html[data-theme="light"] [style*="color:#bae6fd"],
+html[data-theme="light"] [style*="color:#7dd3fc"],
+html[data-theme="light"] [style*="color:#38bdf8"] { color:#0274b3 !important; }
+html[data-theme="light"] [style*="color:#4ade80"],
+html[data-theme="light"] [style*="color:#6ee7b7"],
+html[data-theme="light"] [style*="color:#86efac"] { color:#047251 !important; }
+html[data-theme="light"] [style*="color:#fde68a"],
+html[data-theme="light"] [style*="color:#fcd34d"],
+html[data-theme="light"] [style*="color:#fbbf24"] { color:#9a6006 !important; }
+html[data-theme="light"] [style*="color:#fca5a5"],
+html[data-theme="light"] [style*="color:#fda4af"],
+html[data-theme="light"] [style*="color:#f87171"] { color:#be1f36 !important; }

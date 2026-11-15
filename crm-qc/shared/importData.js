@@ -147,6 +147,7 @@ function restore(db, backup, mode) {
   const sameOrigin = !!currentId && currentId === b.datasetId;
   if (mode === 'replace') {
     if (b.settings) { db.settings = Object.assign({}, db.settings, b.settings); if(!own(b.settings,'callCriteria')) delete db.settings.callCriteria; }
+    if (b.lists && typeof b.lists === 'object' && !Array.isArray(b.lists)) db.lists = clone(b.lists);
     db.agents = b.agents; db.tickets = b.tickets; db.socials = b.socials; db.callFeedbacks = b.callFeedbacks;
     db.callSituational = Array.isArray(b.callSituational) ? b.callSituational : [];
     db.monthlyScores = Array.isArray(b.monthlyScores) ? b.monthlyScores : [];
@@ -155,6 +156,13 @@ function restore(db, backup, mode) {
     db.agentActions = b.agentActions || {};
     db.actionTypes = Array.isArray(b.actionTypes) ? b.actionTypes.slice() : null; // null ⇒ پیش‌فرض‌ها در ensure
     db.reminders = Array.isArray(b.reminders) ? b.reminders : [];
+    if (Array.isArray(b.fiscalMonths)) db.fiscalMonths = clone(b.fiscalMonths);
+    if (Array.isArray(b.elements)) db.elements = clone(b.elements);
+    // حفظ ایمنی: فقط وقتی بک‌اپ فهرست غیرخالی و دارای مدیر دارد جایگزین شود تا ورود Apps Script قفل نشود
+    if (Array.isArray(b.qcUsers) && b.qcUsers.length) {
+      const hasAdmin = b.qcUsers.some(u => u && u.role === 'admin' && u.active !== false);
+      if (hasAdmin || !Array.isArray(db.qcUsers) || !db.qcUsers.length) db.qcUsers = clone(b.qcUsers);
+    }
     db.callImport = b.callImport || null; db.callRaw = null;
   } else {
     ['tickets','socials','callFeedbacks'].forEach(field=>b[field].forEach(row=>{const nameField=field==='callFeedbacks'?'expertName':'agentName';const person=P.resolveExpert(db.agents||[],row[nameField]).agent;if(person&&person.name!==row[nameField]){row[field==='callFeedbacks'?'sourceExpertName':'sourceAgentName']=row[nameField];row[nameField]=person.name;}}));
@@ -204,6 +212,23 @@ function restore(db, backup, mode) {
     db.reminders = (db.reminders || []).concat((Array.isArray(b.reminders) ? b.reminders : []).filter((x) => {
       const sig = remSig(x); if (remSeen.has(sig)) return false; remSeen.add(sig); return true;
     }));
+    // ماه‌های مالی: افزودن بازه‌های جدید بدون تکرار
+    if (Array.isArray(b.fiscalMonths) && b.fiscalMonths.length) {
+      db.fiscalMonths = Array.isArray(db.fiscalMonths) ? db.fiscalMonths : [];
+      const fmSeen = new Set(db.fiscalMonths.map(x => stable([x.name, x.from, x.to])));
+      b.fiscalMonths.forEach(x => {
+        const sig = stable([x.name, x.from, x.to]);
+        if (!fmSeen.has(sig)) { db.fiscalMonths.push(clone(x)); fmSeen.add(sig); }
+      });
+    }
+    // فهرست‌های پایه: ادغام بدون حذف مقادیر موجود
+    if (b.lists && typeof b.lists === 'object' && !Array.isArray(b.lists)) {
+      db.lists = db.lists || {};
+      Object.keys(b.lists).forEach(k => {
+        if (['__proto__','prototype','constructor'].includes(k)) return;
+        if (Array.isArray(b.lists[k])) db.lists[k] = Array.from(new Set((db.lists[k] || []).concat(b.lists[k])));
+      });
+    }
     // ادغام ماهانه تنظیمات و تیم/داخلی موجود را تغییر نمی‌دهد.
   }
   db.seq = db.seq || {};
@@ -214,7 +239,21 @@ function restore(db, backup, mode) {
   db.reminders = db.reminders || [];
   db.seq.reminder = resequence(db.reminders, db.seq.reminder);
   db.registryCleared = db.agents.length === 0;
-  return { ok: true, mode, changes: counts, restored: { agents: db.agents.length, tickets: db.tickets.length, socials: db.socials.length, calls: db.callFeedbacks.length, callSituational: (db.callSituational || []).length, monthlyScores: (db.monthlyScores || []).length } };
+  return {
+    ok: true, mode, changes: counts,
+    restored: {
+      agents: db.agents.length,
+      tickets: db.tickets.length,
+      socials: db.socials.length,
+      calls: db.callFeedbacks.length,
+      callSituational: (db.callSituational || []).length,
+      monthlyScores: (db.monthlyScores || []).length,
+      actions: actions.length,
+      reminders: db.reminders.length,
+      fiscalMonths: (db.fiscalMonths || []).length,
+      qcUsers: (db.qcUsers || []).length
+    }
+  };
 }
 function calls(db, incoming, mode, sourceFile) {
   requireMode(mode);

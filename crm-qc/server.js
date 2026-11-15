@@ -570,11 +570,15 @@ async function dispatchApi(req, res, pathname, query, body, session) {
     const from = str(query.from), to = str(query.to);
     const inRange = (d) => QCReports.inRange(d, from, to);
     const out = {
-      schema: 'crm-qc-backup', version: 3, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
+      schema: 'crm-qc-backup', version: 4, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
       range: { from: from || null, to: to || null },
       settings: db.settings,
+      lists: db.lists || {},
       agents: db.agents,
       qcAgents: db.qcAgents,
+      qcUsers: db.qcUsers || [],
+      fiscalMonths: db.fiscalMonths || [],
+      elements: db.elements || [],
       agentActions: db.agentActions || {},
       actionTypes: ExpertRef.actionTypes(db),
       reminders: ExpertRef.reminderList(db),

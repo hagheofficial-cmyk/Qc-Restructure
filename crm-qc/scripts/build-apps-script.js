@@ -255,6 +255,8 @@ function makeCallReport() {
   // Remove incidental challenge-platform snippets copied into this legacy page.
   html = html.replace(/<script\b[^>]*>(?:(?!<\/script>)[\s\S])*?__CF\$cv(?:\.params|\$params)(?:(?!<\/script>)[\s\S])*?<\/script>/gi, '');
   html = html.replace(/<link\b[^>]*href=["'][^"']*(?:favicon|apple-touch-icon)[^"']*["'][^>]*>/gi, '');
+  const crFavicon = dataUri(path.join(PUBLIC, 'favicon.png'));
+  html = html.replace('</head>', `<link rel="icon" type="image/png" href="${crFavicon}">\n</head>`);
   html = html.replace('</head>', `<link rel="icon" type="image/png" href="${logo}">\n</head>`);
   html = html.replace(/src=(["'])logo\.png(?:\?[^"']*)?\1/g, 'data-app-logo src=""');
   html = html.replace(/<link\b[^>]*href=["']vendor\/fontawesome\/css\/all\.min\.css["'][^>]*>/gi, fontAwesomeTag());

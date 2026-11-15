@@ -191,7 +191,7 @@ async function render(root) {
           }
         },
         scales: {
-          x: { min: 0, max: 100, grid: { color: 'rgba(34,48,79,.5)' }, ticks: { callback: (v) => v + '٪' } },
+          x: { min: 0, max: 100, grid: {}, ticks: { callback: (v) => v + '٪' } },
           y: { grid: { display: false }, ticks: { font: { size: 11.5 } } }
         }
       }
@@ -205,7 +205,7 @@ async function render(root) {
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ' ' + tooltipLabel + ': ' + fa(c.parsed.y) } } },
-        scales: { y: { min: 0, max: 100, grid: { color: 'rgba(34,48,79,.5)' } }, x: { grid: { display: false }, ticks: { maxRotation: 60, font: { size: 10 } } } }
+        scales: { y: { min: 0, max: 100, grid: {} }, x: { grid: { display: false }, ticks: { maxRotation: 60, font: { size: 10 } } } }
       }
     });
   }
@@ -298,7 +298,7 @@ ${elementsCardHTML('teal')}`;
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom' } },
-          scales: { y: { grid: { color: 'rgba(34,48,79,.5)' }, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
+          scales: { y: { grid: {}, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
         }
       });
     } else if (F.type === 'call') {
@@ -321,7 +321,7 @@ ${elementsCardHTML('teal')}`;
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom' } },
-          scales: { y: { grid: { color: 'rgba(34,48,79,.5)' }, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
+          scales: { y: { grid: {}, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
         }
       });
       /* کارت نمره‌ی اقلام کلی — «کلا روی کدام المان چه نمره‌ای گرفته‌شده» */

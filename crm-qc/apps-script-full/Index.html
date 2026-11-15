@@ -21,15 +21,14 @@
 
 
 <script>
-/* آیکون سربرگ مرورگر: اگر favicon.png در دسترس نباشد (صفحه‌ای که داخل بسته‌ی
- * اکستنشن یا HtmlService باز می‌شود)، آیکون از خود لوگوی سامانه ساخته می‌شود تا
- * آیکون پیش‌فرض مرورگر/اکستنشن روی تب نماند. */
+/* آیکون سربرگ مرورگر: لوگوی رسمی سامانه همیشه به‌صورت ایمن روی تب مرورگر تنظیم می‌شود. */
 (function () {
   function paint() {
     try {
       var src = window.APP_SCRIPT_LOGO_DATA || 'logo.png';
       var link = document.querySelector('link[rel="icon"]');
       if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      var shortcut = document.querySelector('link[rel="shortcut icon"]');
       var img = new Image();
       img.onload = function () {
         try {
@@ -38,8 +37,10 @@
           var ctx = canvas.getContext('2d');
           var size = Math.min(img.width || 64, img.height || 64);
           ctx.drawImage(img, ((img.width || 64) - size) / 2, ((img.height || 64) - size) / 2, size, size, 0, 0, 64, 64);
+          var png = canvas.toDataURL('image/png');
           link.type = 'image/png';
-          link.href = canvas.toDataURL('image/png');
+          link.href = png;
+          if (shortcut) { shortcut.type = 'image/png'; shortcut.href = png; }
         } catch (e) {}
       };
       img.src = src;
@@ -117,8 +118,23 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   --line: #22304f;
   --line-soft: #1b2742;
   --ink: #f1f5f9;
+  --text: #f1f5f9;
   --ink-2: #cbd5e1;
   --muted: #8ea0bd;
+  --row-hover: rgba(30, 41, 59, .55);
+  --border-hover: #33507f;
+  --backdrop: rgba(2, 8, 23, .65);
+  --placeholder: #5b6b8c;
+  --hm-na-bg: rgba(30, 41, 59, .5);
+  --hm-na-fg: var(--muted);
+  --hm-crit-bg: rgba(248, 113, 113, .38);
+  --hm-crit-fg: #fecaca;
+  --hm-high-bg: rgba(251, 191, 36, .30);
+  --hm-high-fg: #fde68a;
+  --hm-mid-bg: rgba(251, 146, 60, .20);
+  --hm-mid-fg: #fdba74;
+  --hm-ok-bg: rgba(52, 211, 153, .14);
+  --hm-ok-fg: #6ee7b7;
   --brand: #38bdf8;
   --brand-deep: #0ea5e9;
   --brand-soft: rgba(56, 189, 248, .12);
@@ -176,7 +192,7 @@ i { font-style: normal; }
 }
 .sidebar.open { transform: none; box-shadow: -20px 0 60px rgba(0,0,0,.5); }
 .sidebar-backdrop {
-  position: fixed; inset: 0; background: rgba(2,8,23,.55); z-index: 55;
+  position: fixed; inset: 0; background: var(--backdrop); z-index: 55;
   opacity: 0; pointer-events: none; transition: opacity .2s;
 }
 .sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
@@ -254,7 +270,7 @@ i { font-style: normal; }
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 16px;
   display: flex; gap: 13px; align-items: center; transition: transform .18s, border-color .18s; position: relative; overflow: hidden;
 }
-.kpi:hover { transform: translateY(-2px); border-color: #2e4470; }
+.kpi:hover { transform: translateY(-2px); border-color: var(--border-hover); }
 .kpi::after { content: ''; position: absolute; inset-inline-end: -30px; top: -30px; width: 90px; height: 90px; border-radius: 50%; background: currentColor; opacity: .05; }
 .kpi-ic { width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center; font-size: 19px; flex-shrink: 0; }
 .kpi.blue { color: var(--brand); } .kpi.blue .kpi-ic { background: var(--brand-soft); }
@@ -284,7 +300,7 @@ i { font-style: normal; }
 }
 .input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(56,189,248,.15); }
 .input.invalid { border-color: var(--bad); }
-.input::placeholder { color: #5b6b8c; }
+.input::placeholder { color: var(--placeholder); }
 textarea.input { resize: vertical; min-height: 74px; }
 select.input { cursor: pointer; }
 input[type="time"].input { direction: ltr; text-align: center; }
@@ -374,7 +390,7 @@ input[type="time"].input { direction: ltr; text-align: center; }
 .btn.primary { background: linear-gradient(135deg, var(--brand-deep), #0369a1); color: #f0f9ff; box-shadow: 0 4px 14px rgba(14,165,233,.3); }
 .btn.primary:hover:not(:disabled) { filter: brightness(1.12); }
 .btn.ghost { background: var(--panel-2); border-color: var(--line); color: var(--ink-2); }
-.btn.ghost:hover { border-color: #33507f; color: var(--ink); }
+.btn.ghost:hover { border-color: var(--border-hover); color: var(--ink); }
 .btn.soft { background: var(--brand-soft); color: var(--brand); }
 .btn.soft:hover { background: rgba(56,189,248,.2); }
 .btn.success-soft { background: var(--good-soft); color: var(--good); }
@@ -392,7 +408,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 }
 .tbl tbody td { padding: 10px 12px; border-bottom: 1px solid var(--line-soft); white-space: nowrap; vertical-align: middle; }
 .tbl tbody tr { transition: background .13s; }
-.tbl tbody tr:hover { background: rgba(30,41,59,.55); }
+.tbl tbody tr:hover { background: var(--row-hover); }
 .tbl .cell-main { font-weight: 700; color: var(--ink); }
 .tbl .cell-sub { font-size: 10.8px; color: var(--muted); }
 .tbl tfoot td { padding: 10px 12px; font-weight: 800; background: var(--bg-2); }
@@ -468,7 +484,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 @keyframes toastOut { to { opacity: 0; transform: translateY(10px); } }
 
 /* ----------------------------------------------------------------- مودال */
-.modal-back { position: fixed; inset: 0; background: rgba(2,8,23,.7); backdrop-filter: blur(4px); z-index: 200; display: grid; place-items: center; padding: 18px; animation: fadeIn .18s; }
+.modal-back { position: fixed; inset: 0; background: var(--backdrop); backdrop-filter: blur(4px); z-index: 200; display: grid; place-items: center; padding: 18px; animation: fadeIn .18s; }
 .modal { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-lg); width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; box-shadow: var(--shadow); animation: popIn .2s ease; }
 .modal.lg { max-width: 860px; }
 .modal-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line-soft); position: sticky; top: 0; background: var(--panel); z-index: 3; }
@@ -603,7 +619,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 .cr-embed-state.bad { color:var(--bad); }
 .cr-embed-hint b { color:var(--text); }
 .cr-embed-wrap { height:calc(100vh - 226px); min-height:540px; }
-.cr-embed-frame { width:100%; height:100%; border:0; display:block; background:#0b1220; }
+.cr-embed-frame { width:100%; height:100%; border:0; display:block; background:var(--bg-2); }
 .cr-embed-fallback { max-width:760px; margin:38px auto; }
 .cr-embed-fallback p { margin:14px 0 18px; line-height:2; color:var(--muted); }
 
@@ -674,7 +690,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 .fm-total { font-size:11.5px; color:var(--muted); }
 .fm-summary.has-err .fm-chip { border-color:rgba(248,113,113,.35); }
 .fm-err { flex:1 1 100%; display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border-radius:10px;
-  border:1px solid rgba(248,113,113,.35); background:rgba(248,113,113,.07); color:#fca5a5; font-size:12px; }
+  border:1px solid rgba(248,113,113,.35); background:var(--bad-soft); color:var(--bad); font-size:12px; }
 .fm-err ul { margin:0; padding-inline-start:16px; line-height:1.9; }
 
 /* زیرمجموعه‌ی کارشناس QC — ست‌کردن از مدیریت کارشناسان */
@@ -684,7 +700,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 .qc-subset-head b { font-size:13px; }
 .qc-subset-head .sub { font-size:11px; color:var(--muted); margin-top:2px; }
 .qc-subset-ic { width:32px; height:32px; border-radius:10px; display:grid; place-items:center;
-  background:rgba(56,189,248,.14); color:#38bdf8; font-size:14px; flex:0 0 auto; }
+  background:var(--brand-soft); color:var(--brand); font-size:14px; flex:0 0 auto; }
 .qc-subset-row { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-top:10px; }
 .qc-subset-f { display:flex; flex-direction:column; gap:5px; font-size:11px; color:var(--muted); font-weight:700; min-width:180px; flex:1 1 180px; }
 .qc-subset-f .input { height:40px; font-size:13px; }
@@ -727,8 +743,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 .sc-col.info { border-color:rgba(56,189,248,.28); background:rgba(56,189,248,.06); }
 .sc-col-head { display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:8px; }
 .sc-col.good .sc-col-head i { color:var(--good); }
-.sc-col.bad .sc-col-head i { color:#f87171; }
-.sc-col.info .sc-col-head i { color:#38bdf8; }
+.sc-col.bad .sc-col-head i { color:var(--bad); }
+.sc-col.info .sc-col-head i { color:var(--brand); }
 .sc-col ul { margin:0; padding-inline-start:16px; display:flex; flex-direction:column; gap:7px; }
 .sc-col li { font-size:12px; line-height:1.85; color:var(--text); }
 .sc-grade { font-size:12px; padding:6px 12px; }
@@ -742,33 +758,125 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 :root { color-scheme: dark; }
 :root[data-theme="light"] {
   color-scheme: light;
-  /* پالت حالت روشن: خاکستری‌آبی ملایم‌تر (کمتر سفید، کمتر خیرگی) */
-  --bg:#e4eaf3; --bg-2:#dde6f1; --panel:#f3f6fb; --panel-2:#e9eff7; --panel-soft:#e1e9f4;
-  --soft:#d6e0ed; --line:#bccbdd; --line-soft:#cfdae8; --border:#bccbdd; --border-soft:#cfdae8;
-  --ink:#1c2c42; --ink-2:#3a4e69; --muted:#5a6e89;
-  --brand:#0a6a9c; --brand-deep:#095f8c; --brand-soft:rgba(2,132,199,.10);
-  --violet:#6540bd; --violet-soft:rgba(109,66,200,.09);
-  --good:#066b4f; --good-deep:#066b4f; --good-soft:rgba(5,150,105,.11);
-  --bad:#b42539; --bad-deep:#b42539; --bad-soft:rgba(225,29,72,.09);
-  --warn:#8e5f08; --warn-soft:rgba(217,119,6,.11); --shadow:0 10px 28px rgba(28,52,88,.11);
-  --filters-bg:#e9eff7;
+  /* پالت حالت روشن: تمیز، خوانا، با کنتراست استاندارد بدون اجزای تیره */
+  --bg:#edf2f8; --bg-2:#e3ebf5; --panel:#ffffff; --panel-2:#f4f7fc; --panel-soft:#eaf0f8;
+  --soft:#dce6f2; --line:#c5d4e6; --line-soft:#dce6f1; --border:#c5d4e6; --border-soft:#dce6f1;
+  --ink:#16253b; --text:#16253b; --ink-2:#334863; --muted:#5a6f8a;
+  --brand:#0274b3; --brand-deep:#036298; --brand-soft:rgba(2,116,179,.10);
+  --violet:#633cc2; --violet-soft:rgba(99,60,194,.10);
+  --good:#047251; --good-deep:#046c4e; --good-soft:rgba(4,114,81,.11);
+  --bad:#be1f36; --bad-deep:#b01c31; --bad-soft:rgba(190,31,54,.10);
+  --warn:#9a6006; --warn-soft:rgba(180,104,6,.12);
+  --shadow:0 6px 22px rgba(20,38,62,.08);
+  --filters-bg:#f4f7fc;
+  --row-hover:rgba(2,116,179,.08);
+  --border-hover:#7aa3cc;
+  --backdrop:rgba(20,38,62,.36);
+  --placeholder:#7a8fa9;
+  --hm-na-bg:#eef3f9; --hm-na-fg:#6e829c;
+  --hm-crit-bg:rgba(190,31,54,.16); --hm-crit-fg:#9f1239;
+  --hm-high-bg:rgba(180,104,6,.16); --hm-high-fg:#854d0e;
+  --hm-mid-bg:rgba(217,119,6,.13); --hm-mid-fg:#9a3412;
+  --hm-ok-bg:rgba(4,114,81,.12); --hm-ok-fg:#065f46;
 }
-[data-theme="light"] .sidebar { background:linear-gradient(180deg,#eef3f9,#dfe7f2); }
-[data-theme="light"] .topbar { background:rgba(228,234,243,.94); }
-[data-theme="light"] .global-range { background:var(--panel-2); }
-[data-theme="light"] .tbl thead { background:var(--panel-2); }
-[data-theme="light"] .btn.primary,[data-theme="light"] .btn.brand { color:#fff; }
+html[data-theme="light"] { scrollbar-color: #b1c3d9 transparent; }
+[data-theme="light"] body {
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(2,116,179,.07), transparent 60%),
+    radial-gradient(900px 500px at 0% 110%, rgba(99,60,194,.05), transparent 55%),
+    var(--bg);
+}
+[data-theme="light"] .sidebar { background:linear-gradient(180deg,#ffffff,#eef3f9); border-left-color:var(--line); }
+[data-theme="light"] .sidebar.open { box-shadow:-16px 0 44px rgba(20,38,62,.16); }
+[data-theme="light"] .topbar { background:rgba(255,255,255,.92); border-bottom-color:var(--line); }
+[data-theme="light"] .global-range { background:var(--panel-2); border-bottom-color:var(--line); box-shadow:0 4px 14px rgba(20,38,62,.05); }
+[data-theme="light"] .card { background:var(--panel); border-color:var(--line); box-shadow:var(--shadow); }
+[data-theme="light"] .input, [data-theme="light"] select.input, [data-theme="light"] textarea.input { background:#ffffff; border-color:var(--line); color:var(--ink); }
+[data-theme="light"] .input:focus { border-color:var(--brand); box-shadow:0 0 0 3px rgba(2,116,179,.14); }
+[data-theme="light"] .tbl thead, [data-theme="light"] .tbl thead th { background:#eaf0f8; color:#334863; border-bottom-color:var(--line); }
+[data-theme="light"] .tbl tbody td { border-bottom-color:var(--line-soft); color:var(--ink); }
+[data-theme="light"] .tbl tbody tr:hover { background:var(--row-hover); }
+[data-theme="light"] .tbl tbody tr:hover td { color:var(--ink); }
+[data-theme="light"] .tbl tfoot td { background:#eaf0f8; color:var(--ink); }
+[data-theme="light"] .call-detail-row > td { background:#f4f7fc; }
+[data-theme="light"] .btn.primary,[data-theme="light"] .btn.brand { color:#fff; box-shadow:0 4px 12px rgba(2,116,179,.22); }
+[data-theme="light"] .btn.ghost { background:#ffffff; border-color:var(--line); color:var(--ink-2); }
+[data-theme="light"] .btn.ghost:hover { background:var(--panel-soft); border-color:var(--border-hover); color:var(--ink); }
+[data-theme="light"] .btn.soft:hover { background:rgba(2,116,179,.18); }
+[data-theme="light"] .btn.danger-soft:hover { background:rgba(190,31,54,.17); }
+[data-theme="light"] .tri, [data-theme="light"] .tabs, [data-theme="light"] .redline { background:#ffffff; border-color:var(--line); }
+[data-theme="light"] .redline .sw { background:#cbd5e1; }
+[data-theme="light"] .redline .sw::after { background:#ffffff; box-shadow:0 1px 3px rgba(15,23,42,.25); }
+[data-theme="light"] .score-live { background:linear-gradient(180deg,#f7fafe,#ffffff); }
+[data-theme="light"] .criteria-card, [data-theme="light"] .detail-row, [data-theme="light"] .stat-strip .ss { background:#f7fafe; border-color:var(--line-soft); }
+[data-theme="light"] .chip, [data-theme="light"] .xc-pill, [data-theme="light"] .xc-chip, [data-theme="light"] .xc-last, [data-theme="light"] .xc-cart { background:#f4f7fc; border-color:var(--line); color:var(--ink-2); }
+[data-theme="light"] .xc-icon { background:#ffffff; border-color:var(--line); color:var(--ink-2); }
+[data-theme="light"] .ex-card:hover { border-color:var(--border-hover); box-shadow:0 10px 26px rgba(20,38,62,.12); }
+[data-theme="light"] .profile-content { background:var(--bg); }
+[data-theme="light"] .profile-toolbar { background:#f4f7fc; border-bottom-color:var(--line); }
+[data-theme="light"] .profile-summary .summary-block { background:#ffffff; border-color:var(--line); }
+[data-theme="light"] .profile-summary .summary-block.kpi-primary { background:linear-gradient(135deg,rgba(2,116,179,.09),#ffffff); border-color:var(--brand); }
 [data-theme="light"] .heatmap td { color:var(--ink); }
-[data-theme="light"] .note { background:var(--brand-soft); color:var(--ink-2); }
+[data-theme="light"] .note { background:var(--brand-soft); color:var(--ink-2); border-color:rgba(2,116,179,.45); }
 [data-theme="light"] .badge.bad { color:var(--bad); }
 [data-theme="light"] .badge.ok,[data-theme="light"] .badge.good { color:var(--good); }
 [data-theme="light"] .badge.warn { color:var(--warn); }
+[data-theme="light"] .badge.gray { background:#e6edf6; color:#4b607b; }
+[data-theme="light"] .toast { background:#ffffff; border-color:var(--line); color:var(--ink); box-shadow:0 12px 30px rgba(20,38,62,.15); }
+[data-theme="light"] .modal { background:#ffffff; border-color:var(--line); box-shadow:0 20px 52px rgba(20,38,62,.2); }
+[data-theme="light"] .modal-head { background:#ffffff; border-bottom-color:var(--line-soft); }
+[data-theme="light"] .pager button { background:#ffffff; border-color:var(--line); color:var(--ink-2); }
+[data-theme="light"] .pager button.cur { background:var(--brand); border-color:var(--brand); color:#ffffff; }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background:#b1c3d9; }
 [data-theme="light"] .jcal-day { color:var(--ink); }
-[data-theme="light"] .jcal-day.sel { color:#865b00; }
-[data-theme="light"] [style*="color:#fca5a5"],[data-theme="light"] [style*="color:#fecaca"] { color:var(--bad) !important; }
-[data-theme="light"] [style*="color:#fde68a"],[data-theme="light"] [style*="color:#fdba74"] { color:var(--warn) !important; }
-[data-theme="light"] [style*="color:#6ee7b7"] { color:var(--good) !important; }
+[data-theme="light"] .jcal-day:hover { background:rgba(2,116,179,.12); border-color:rgba(2,116,179,.35); }
+[data-theme="light"] .jcal-day.today { background:var(--warn-soft); border-color:rgba(154,96,6,.35); color:var(--warn); }
+[data-theme="light"] .jcal-day.sel { background:var(--brand); border-color:var(--brand); color:#ffffff; }
+[data-theme="light"] .jcal-nav { background:var(--panel-2); border-color:var(--line); color:var(--ink); }
+[data-theme="light"] .sc-col { background:#f8fafd; border-color:var(--line-soft); }
+[data-theme="light"] .sc-col.good { background:rgba(4,114,81,.06); border-color:rgba(4,114,81,.24); }
+[data-theme="light"] .sc-col.bad { background:rgba(190,31,54,.05); border-color:rgba(190,31,54,.24); }
+[data-theme="light"] .sc-col.info { background:rgba(2,116,179,.06); border-color:rgba(2,116,179,.24); }
+[data-theme="light"] .er-mx tr.er-problem td { background:rgba(180,104,6,.07); }
+[data-theme="light"] .cr-embed-bar { background:#f4f7fc; border-bottom-color:var(--line); color:var(--muted); }
+[data-theme="light"] [style*="color:#fca5a5"],[data-theme="light"] [style*="color:#fecaca"],[data-theme="light"] [style*="color:#f87171"] { color:var(--bad) !important; }
+[data-theme="light"] [style*="color:#fde68a"],[data-theme="light"] [style*="color:#fdba74"],[data-theme="light"] [style*="color:#fbbf24"] { color:var(--warn) !important; }
+[data-theme="light"] [style*="color:#6ee7b7"],[data-theme="light"] [style*="color:#34d399"] { color:var(--good) !important; }
+[data-theme="light"] [style*="color:#38bdf8"] { color:var(--brand) !important; }
+[data-theme="light"] [style*="color:#a78bfa"] { color:var(--violet) !important; }
+/* هیت‌مپ خطا (سازگار با حالت تاریک و روشن) */
+.hm-cell { font-weight:700; text-align:center; }
+.hm-na   { background:var(--hm-na-bg);   color:var(--hm-na-fg); }
+.hm-crit { background:var(--hm-crit-bg); color:var(--hm-crit-fg); }
+.hm-high { background:var(--hm-high-bg); color:var(--hm-high-fg); }
+.hm-mid  { background:var(--hm-mid-bg);  color:var(--hm-mid-fg); }
+.hm-ok   { background:var(--hm-ok-bg);   color:var(--hm-ok-fg); }
+/* پنجره بکاپ و انتقال نسخه یک‌کلیکه */
+.quick-backup-btn { border:1px solid rgba(56,189,248,.32); font-weight:700; }
+.qb-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; }
+.qb-box { background:var(--panel-2); border:1px solid var(--line); border-radius:14px; padding:16px; display:flex; flex-direction:column; gap:12px; }
+.qb-box-head { display:flex; align-items:flex-start; gap:10px; }
+.qb-box-head strong { display:block; font-size:13.5px; color:var(--ink); }
+.qb-box-head small { display:block; font-size:11.3px; color:var(--muted); margin-top:2px; line-height:1.65; }
+.qb-ic { width:36px; height:36px; border-radius:11px; display:grid; place-items:center; flex-shrink:0; font-size:15px; }
+.qb-ic.good { background:var(--good-soft); color:var(--good); }
+.qb-ic.brand { background:var(--brand-soft); color:var(--brand); }
+.qb-preview { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font-size:11.8px; }
+.qb-prev-title { margin-bottom:7px; color:var(--ink); display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+.qb-prev-title small { color:var(--muted); }
+.qb-prev-tags { display:flex; flex-wrap:wrap; gap:6px; }
+.qb-prev-tags span { background:var(--panel-soft); border:1px solid var(--line-soft); border-radius:8px; padding:3px 8px; font-size:11.2px; color:var(--ink-2); }
+.qb-prev-tags b { color:var(--brand); }
+.qb-restore-ctl { display:flex; flex-direction:column; gap:10px; }
+.qb-mode-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.qb-mode-opt { display:flex; align-items:flex-start; gap:7px; padding:8px 10px; border:1px solid var(--line); border-radius:10px; background:var(--panel); cursor:pointer; font-size:11.5px; }
+.qb-mode-opt:has(input:checked) { border-color:var(--brand); background:var(--brand-soft); }
+.qb-mode-opt b { display:block; color:var(--ink); font-size:11.8px; }
+.qb-mode-opt small { display:block; color:var(--muted); font-size:10.5px; line-height:1.5; }
+.qb-status { font-size:11.8px; padding:9px 11px; border-radius:9px; background:var(--panel); border:1px solid var(--line); color:var(--ink-2); line-height:1.8; }
+.qb-status.ok { background:var(--good-soft); border-color:rgba(52,211,153,.35); color:var(--good); }
+.qb-status.bad { background:var(--bad-soft); border-color:rgba(248,113,113,.35); color:var(--bad); }
+@media (max-width:700px) { .quick-backup-btn span { display:none; } .qb-mode-row { grid-template-columns:1fr; } }
 .theme-toggle { display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:99px;background:var(--panel);padding:7px 12px;cursor:pointer;font-size:11.5px;white-space:nowrap;color:var(--ink-2); }
 .theme-toggle i { color:var(--warn); } .theme-toggle:hover { border-color:var(--brand);background:var(--brand-soft); }
 :focus-visible { outline:2px solid var(--brand);outline-offset:3px; }
@@ -996,7 +1104,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 /* ---- کارت کارشناس (طرح مرجع: هدر، داخلی، آخرین اقدام، چیپ‌ها، فوتر با نمره‌ی ماه در سمت راست) ---- */
 .ex-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px 20px; display: grid; grid-template-columns: minmax(280px, 1.5fr) minmax(220px, 1.2fr) minmax(220px, 1.5fr) auto; align-items: center; column-gap: 20px; row-gap: 10px; width: 100%; min-width: 0; min-height: 96px; box-sizing: border-box; transition: border-color .15s; }
 .xc-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.ex-card:hover { border-color: #33507f; }
+.ex-card:hover { border-color: var(--border-hover); }
 .xc-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: nowrap; }
 .xc-who { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
 .xc-name { min-width: 0; flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -1004,7 +1112,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 .xc-pill { background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 700; color: var(--ink-2); max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: none; }
 .xc-pill.muted { color: var(--muted); font-weight: 600; }
 .xc-icon { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg-2); color: var(--ink-2); cursor: pointer; display: grid; place-items: center; flex: none; font-size: 12px; transition: all .15s; }
-.xc-icon:hover { border-color: #33507f; color: var(--ink); }
+.xc-icon:hover { border-color: var(--border-hover); color: var(--ink); }
 .xc-icon.sm { width: 28px; height: 28px; font-size: 11px; }
 .xc-contact { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .xc-chip { display: inline-flex; align-items: center; gap: 6px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 11px; font-size: 12px; font-weight: 700; color: var(--ink-2); white-space: nowrap; max-width: 100%; }
@@ -1073,7 +1181,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 12.6px; }
 
 /* کارت‌ها و کارت‌های مرجع کارشناس: بلند شدن ملایم هنگام هاور */
 .card, .kpi, .ex-card, .criteria-team { transition: transform .22s ease, box-shadow .22s ease, border-color .2s ease, background .2s ease; }
-.ex-card:hover { transform: translateY(-2px); box-shadow: 0 10px 26px rgba(2,8,23,.35); }
+.ex-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
 .kpi:hover { transform: translateY(-2px); }
 .criteria-team:hover { transform: translateX(-2px); }
 
@@ -1698,6 +1806,7 @@ table.profile-call-table { width:100%; min-width:0; table-layout:fixed; font-siz
       <div class="topbar-left">
         <span class="data-source-badge" id="dataSourceBadge">سرور</span>
         <button class="btn ghost sm sync-chip" id="syncChip" type="button" hidden title="داده‌های شیت بعد از آخرین خواندن تغییر کرده است"><i class="fa-solid fa-arrows-rotate"></i><span>داده‌ها تازه شد — بروزرسانی</span></button>
+        <button class="btn soft sm quick-backup-btn" id="quickBackupBtn" type="button" title="بکاپ یک‌کلیکه همه داده‌ها و انتقال روی نسخه جدید"><i class="fa-solid fa-cloud-arrow-down"></i><span>بکاپ / انتقال</span></button>
         <button class="theme-toggle" id="themeToggle" type="button" aria-label="تغییر حالت روشن و تاریک" title="تغییر حالت روشن و تاریک"><i class="fa-solid fa-sun"></i><span>حالت روشن</span></button>
         <div class="user-chip" id="userChip" hidden>
           <span class="user-avatar" aria-hidden="true"><i class="fa-solid fa-user"></i></span>
@@ -4815,6 +4924,7 @@ function restore(db, backup, mode) {
   const sameOrigin = !!currentId && currentId === b.datasetId;
   if (mode === 'replace') {
     if (b.settings) { db.settings = Object.assign({}, db.settings, b.settings); if(!own(b.settings,'callCriteria')) delete db.settings.callCriteria; }
+    if (b.lists && typeof b.lists === 'object' && !Array.isArray(b.lists)) db.lists = clone(b.lists);
     db.agents = b.agents; db.tickets = b.tickets; db.socials = b.socials; db.callFeedbacks = b.callFeedbacks;
     db.callSituational = Array.isArray(b.callSituational) ? b.callSituational : [];
     db.monthlyScores = Array.isArray(b.monthlyScores) ? b.monthlyScores : [];
@@ -4823,6 +4933,13 @@ function restore(db, backup, mode) {
     db.agentActions = b.agentActions || {};
     db.actionTypes = Array.isArray(b.actionTypes) ? b.actionTypes.slice() : null; // null ⇒ پیش‌فرض‌ها در ensure
     db.reminders = Array.isArray(b.reminders) ? b.reminders : [];
+    if (Array.isArray(b.fiscalMonths)) db.fiscalMonths = clone(b.fiscalMonths);
+    if (Array.isArray(b.elements)) db.elements = clone(b.elements);
+    // حفظ ایمنی: فقط وقتی بک‌اپ فهرست غیرخالی و دارای مدیر دارد جایگزین شود تا ورود Apps Script قفل نشود
+    if (Array.isArray(b.qcUsers) && b.qcUsers.length) {
+      const hasAdmin = b.qcUsers.some(u => u && u.role === 'admin' && u.active !== false);
+      if (hasAdmin || !Array.isArray(db.qcUsers) || !db.qcUsers.length) db.qcUsers = clone(b.qcUsers);
+    }
     db.callImport = b.callImport || null; db.callRaw = null;
   } else {
     ['tickets','socials','callFeedbacks'].forEach(field=>b[field].forEach(row=>{const nameField=field==='callFeedbacks'?'expertName':'agentName';const person=P.resolveExpert(db.agents||[],row[nameField]).agent;if(person&&person.name!==row[nameField]){row[field==='callFeedbacks'?'sourceExpertName':'sourceAgentName']=row[nameField];row[nameField]=person.name;}}));
@@ -4872,6 +4989,23 @@ function restore(db, backup, mode) {
     db.reminders = (db.reminders || []).concat((Array.isArray(b.reminders) ? b.reminders : []).filter((x) => {
       const sig = remSig(x); if (remSeen.has(sig)) return false; remSeen.add(sig); return true;
     }));
+    // ماه‌های مالی: افزودن بازه‌های جدید بدون تکرار
+    if (Array.isArray(b.fiscalMonths) && b.fiscalMonths.length) {
+      db.fiscalMonths = Array.isArray(db.fiscalMonths) ? db.fiscalMonths : [];
+      const fmSeen = new Set(db.fiscalMonths.map(x => stable([x.name, x.from, x.to])));
+      b.fiscalMonths.forEach(x => {
+        const sig = stable([x.name, x.from, x.to]);
+        if (!fmSeen.has(sig)) { db.fiscalMonths.push(clone(x)); fmSeen.add(sig); }
+      });
+    }
+    // فهرست‌های پایه: ادغام بدون حذف مقادیر موجود
+    if (b.lists && typeof b.lists === 'object' && !Array.isArray(b.lists)) {
+      db.lists = db.lists || {};
+      Object.keys(b.lists).forEach(k => {
+        if (['__proto__','prototype','constructor'].includes(k)) return;
+        if (Array.isArray(b.lists[k])) db.lists[k] = Array.from(new Set((db.lists[k] || []).concat(b.lists[k])));
+      });
+    }
     // ادغام ماهانه تنظیمات و تیم/داخلی موجود را تغییر نمی‌دهد.
   }
   db.seq = db.seq || {};
@@ -4882,7 +5016,21 @@ function restore(db, backup, mode) {
   db.reminders = db.reminders || [];
   db.seq.reminder = resequence(db.reminders, db.seq.reminder);
   db.registryCleared = db.agents.length === 0;
-  return { ok: true, mode, changes: counts, restored: { agents: db.agents.length, tickets: db.tickets.length, socials: db.socials.length, calls: db.callFeedbacks.length, callSituational: (db.callSituational || []).length, monthlyScores: (db.monthlyScores || []).length } };
+  return {
+    ok: true, mode, changes: counts,
+    restored: {
+      agents: db.agents.length,
+      tickets: db.tickets.length,
+      socials: db.socials.length,
+      calls: db.callFeedbacks.length,
+      callSituational: (db.callSituational || []).length,
+      monthlyScores: (db.monthlyScores || []).length,
+      actions: actions.length,
+      reminders: db.reminders.length,
+      fiscalMonths: (db.fiscalMonths || []).length,
+      qcUsers: (db.qcUsers || []).length
+    }
+  };
 }
 function calls(db, incoming, mode, sourceFile) {
   requireMode(mode);
@@ -6575,9 +6723,13 @@ function dispatch(method, url, body) {
     const to = q.to || '';
     const inRange = (d) => R.inRange(d, from, to);
     return clone({
-      schema: 'crm-qc-backup', version: 3, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
+      schema: 'crm-qc-backup', version: 4, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
       range: { from: from || null, to: to || null },
-      settings: db.settings, agents: db.agents, qcAgents: db.qcAgents,
+      settings: db.settings, lists: db.lists || {},
+      agents: db.agents, qcAgents: db.qcAgents,
+      qcUsers: db.qcUsers || [],
+      fiscalMonths: db.fiscalMonths || [],
+      elements: db.elements || [],
       agentActions: db.agentActions || {},
       actionTypes: X.actionTypes(db),
       reminders: X.reminderList(db),
@@ -8493,7 +8645,8 @@ function scoreBands() {
 }
 function scoreColorHex(v) {
   const B = scoreBands();
-  return v >= B[0] ? '#34d399' : v >= B[1] ? '#38bdf8' : v >= B[2] ? '#fbbf24' : '#f87171';
+  const isL = document.documentElement.dataset.theme === 'light';
+  return v >= B[0] ? (isL ? '#0d7a5f' : '#34d399') : v >= B[1] ? (isL ? '#0274b3' : '#38bdf8') : v >= B[2] ? (isL ? '#b45309' : '#fbbf24') : (isL ? '#be123c' : '#f87171');
 }
 function scoreColorRgba(v) {
   const B = scoreBands();
@@ -8772,14 +8925,225 @@ const App = {
     try { localStorage.setItem('crmqc.theme.v1', this.theme); } catch(e) {}
     const button = $('#themeToggle');
     if (button) { button.innerHTML = `<i class="fa-solid ${this.theme === 'dark' ? 'fa-sun' : 'fa-moon'}"></i><span>${this.theme === 'dark' ? 'حالت روشن' : 'حالت تاریک'}</span>`; button.setAttribute('aria-pressed',String(this.theme === 'light')); }
-    this.charts.forEach(chart => { if (!chart.config || !chart.config.options) return; this.styleChart(chart.config.options); if (chart.update) chart.update('none'); });
-    const frame = $('#crFrame'); if (frame && frame.contentWindow) frame.contentWindow.postMessage({ type:'crmqc:theme', theme:this.theme }, location.origin === 'null' ? '*' : location.origin);
+    this.charts.forEach(chart => {
+      if (!chart.config || !chart.config.options) return;
+      this.styleChart(chart.config.options, chart);
+      if (chart.update) chart.update('none');
+    });
+    const targetOrigin = location.origin === 'null' ? '*' : location.origin;
+    $$('#crFrame, .cr-embed-frame').forEach(frame => {
+      if (frame && frame.contentWindow) {
+        try { frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: this.theme }, '*'); }
+        catch (e) { try { frame.contentWindow.postMessage({ type: 'crmqc:theme', theme: this.theme }, targetOrigin); } catch (_) {} }
+      }
+    });
   },
-  styleChart(options) {
-    const css = getComputedStyle(document.documentElement), color = css.getPropertyValue('--muted').trim(), grid = css.getPropertyValue('--line-soft').trim();
-    if (options.scales) Object.values(options.scales).forEach(scale => { scale.ticks = Object.assign({},scale.ticks,{ color }); scale.grid = Object.assign({},scale.grid,{ color:grid }); });
-    options.plugins = options.plugins || {}; options.plugins.legend = options.plugins.legend || {};
-    options.plugins.legend.labels = Object.assign({}, options.plugins.legend.labels, { color });
+  styleChart(options, chart) {
+    const css = getComputedStyle(document.documentElement);
+    const color = css.getPropertyValue('--muted').trim() || '#8ea0bd';
+    const ink = css.getPropertyValue('--ink').trim() || '#f1f5f9';
+    const ink2 = css.getPropertyValue('--ink-2').trim() || '#cbd5e1';
+    const panel = css.getPropertyValue('--panel').trim() || '#111a2e';
+    const line = css.getPropertyValue('--line').trim() || '#22304f';
+    const grid = css.getPropertyValue('--line-soft').trim() || '#1b2742';
+    if (options.scales) Object.values(options.scales).forEach(scale => {
+      scale.ticks = Object.assign({}, scale.ticks, { color });
+      scale.grid = Object.assign({}, scale.grid, { color: grid });
+    });
+    options.plugins = options.plugins || {};
+    options.plugins.legend = options.plugins.legend || {};
+    options.plugins.legend.labels = Object.assign({}, options.plugins.legend.labels, { color: ink2 });
+    options.plugins.tooltip = Object.assign({}, options.plugins.tooltip, {
+      backgroundColor: panel, titleColor: ink, bodyColor: ink2, borderColor: line, borderWidth: 1, padding: 10
+    });
+    if (chart && chart.config && (chart.config.type === 'doughnut' || chart.config.type === 'pie') && chart.data && Array.isArray(chart.data.datasets)) {
+      chart.data.datasets.forEach(ds => { if (ds && ds.borderWidth) ds.borderColor = panel; });
+    }
+  },
+
+  /* ---------- بکاپ یک‌کلیکه کامل و بازیابی روی نسخه جدید ---------- */
+  collectBrowserCallReportStorage() {
+    const out = {};
+    ['bimeh_bazar_experts_v2', 'bimeh_bazar_team_access_profiles_v1'].forEach((k) => {
+      try { const v = localStorage.getItem(k); if (v != null && v !== '') out[k] = v; } catch (e) {}
+    });
+    return out;
+  },
+  applyBrowserCallReportStorage(map) {
+    if (!map || typeof map !== 'object') return;
+    ['bimeh_bazar_experts_v2', 'bimeh_bazar_team_access_profiles_v1'].forEach((k) => {
+      if (map[k] == null) return;
+      try {
+        const val = typeof map[k] === 'string' ? map[k] : JSON.stringify(map[k]);
+        localStorage.setItem(k, val);
+      } catch (e) {}
+    });
+  },
+  async downloadFullBackup(opts) {
+    opts = opts || {};
+    const from = opts.from || '', to = opts.to || '';
+    const qs = (from || to) ? '?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) : '';
+    const data = await api.get('/api/backup' + qs);
+    if (!data.callReportStorage) {
+      const localCr = this.collectBrowserCallReportStorage();
+      if (Object.keys(localCr).length) data.callReportStorage = localCr;
+    }
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (from || to)
+      ? `crm-qc-backup-${from ? from.replaceAll('/', '-') : 'start'}_${to ? to.replaceAll('/', '-') : 'end'}.json`
+      : `crm-qc-full-backup-${stamp}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    return data;
+  },
+  openQuickBackup() {
+    if (window.QCAuth && !window.QCAuth.can('data')) {
+      toast.error('فقط مدیر سامانه به بکاپ و بازیابی دسترسی دارد');
+      return;
+    }
+    const m = modal(`${modalHead('بکاپ کامل و انتقال به نسخه جدید سامانه', 'fa-cloud-arrow-down')}
+      <div class="modal-body"><div class="qb-wrap">
+        <div class="note" style="margin-bottom:14px">
+          <i class="fa-solid fa-circle-info"></i>
+          <span>با یک کلیک از <b>کل داده‌های ثبت‌شده روی سامانه</b> (تیکت، سوشال، ریت تماس ثابت، موقعیتی، نمرات ماهانه، کارشناسان، اقدامات و یادآورها، ماه‌های مالی، المان‌ها، کاربران QC، تنظیمات و لیست کارشناسان گزارش تماس) فایل بکاپ بگیرید و پس از آپدیت کد روی نسخه جدید آپلود کنید.</span>
+        </div>
+        <div class="qb-grid">
+          <div class="qb-box">
+            <div class="qb-box-head"><span class="qb-ic good"><i class="fa-solid fa-cloud-arrow-down"></i></span><div><strong>۱) دریافت بکاپ کامل (یک کلیک)</strong><small>دانلود فایل JSON شامل همه اطلاعات سامانه بدون محدودیت تاریخ</small></div></div>
+            <button type="button" class="btn primary" id="qbDownloadBtn" style="width:100%"><i class="fa-solid fa-floppy-disk"></i> دانلود بکاپ کامل همه داده‌ها</button>
+            <div id="qbDownInfo" class="qb-status" hidden></div>
+          </div>
+          <div class="qb-box">
+            <div class="qb-box-head"><span class="qb-ic brand"><i class="fa-solid fa-cloud-arrow-up"></i></span><div><strong>۲) آپلود بکاپ روی نسخه جدید</strong><small>فایل بکاپ JSON را انتخاب کنید تا همه داده‌ها یکجا بازیابی شوند</small></div></div>
+            <button type="button" class="btn soft" id="qbPickBtn" style="width:100%"><i class="fa-solid fa-file-arrow-up"></i> انتخاب فایل بکاپ (.json)</button>
+            <input type="file" id="qbFileInp" accept=".json,application/json" hidden>
+            <div id="qbPreview" class="qb-preview" hidden></div>
+            <div id="qbRestoreControls" class="qb-restore-ctl" hidden>
+              <div class="qb-mode-row">
+                <label class="qb-mode-opt"><input type="radio" name="qbMode" value="replace" checked><span><b>جایگزینی کامل</b><small>پیشنهادی برای انتقال به نسخه جدید</small></span></label>
+                <label class="qb-mode-opt"><input type="radio" name="qbMode" value="append"><span><b>ادغام با داده‌های فعلی</b><small>حفظ داده‌های موجود + افزودن بکاپ</small></span></label>
+              </div>
+              <button type="button" class="btn primary" id="qbApplyBtn" style="width:100%"><i class="fa-solid fa-check-double"></i> شروع بازیابی کامل</button>
+            </div>
+            <div id="qbUpInfo" class="qb-status" hidden></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="modal-foot"><button type="button" class="btn ghost" id="qbClose" data-close>بستن</button></div>`, { lg: true });
+    const root = m;
+    $('#qbClose', root).addEventListener('click', () => m.close());
+    $('#qbDownloadBtn', root).addEventListener('click', async () => {
+      const btn = $('#qbDownloadBtn', root);
+      const info = $('#qbDownInfo', root);
+      btn.disabled = true;
+      try {
+        const data = await this.downloadFullBackup();
+        const actCount = Object.values(data.agentActions || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0);
+        info.hidden = false;
+        info.className = 'qb-status ok';
+        info.innerHTML = `<i class="fa-solid fa-circle-check"></i> بکاپ کامل دانلود شد: <b>${fa((data.agents || []).length)}</b> کارشناس · <b>${fa((data.tickets || []).length)}</b> تیکت · <b>${fa((data.socials || []).length)}</b> سوشال · <b>${fa((data.callFeedbacks || []).length)}</b> تماس ثابت · <b>${fa((data.callSituational || []).length)}</b> موقعیتی · <b>${fa((data.monthlyScores || []).length)}</b> نمره ماهانه · <b>${fa(actCount)}</b> اقدام · <b>${fa((data.reminders || []).length)}</b> یادآور · <b>${fa((data.fiscalMonths || []).length)}</b> ماه مالی`;
+        toast.success('فایل بکاپ کامل همه داده‌ها با موفقیت دانلود شد');
+      } catch (e) {
+        info.hidden = false;
+        info.className = 'qb-status bad';
+        info.textContent = 'خطا در تهیه بکاپ: ' + e.message;
+        toast.error(e.message);
+      }
+      btn.disabled = false;
+    });
+
+    let pendingObj = null, pendingKind = '';
+    const pickBtn = $('#qbPickBtn', root), fileInp = $('#qbFileInp', root);
+    const prevEl = $('#qbPreview', root), ctlEl = $('#qbRestoreControls', root), upInfo = $('#qbUpInfo', root);
+    pickBtn.addEventListener('click', () => fileInp.click());
+    fileInp.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const rd = new FileReader();
+      rd.onload = () => {
+        try {
+          const obj = JSON.parse(rd.result);
+          const isBackup = obj && obj.schema === 'crm-qc-backup';
+          const isRecovery = obj && (obj.teleRawData || obj.accRawData || obj.mlmRawData);
+          if (!isBackup && !isRecovery) throw new Error('این فایل بکاپ معتبر سامانه کنترل کیفیت نیست');
+          pendingObj = obj;
+          pendingKind = isBackup ? 'backup' : 'recovery';
+          upInfo.hidden = true;
+          prevEl.hidden = false;
+          if (isBackup) {
+            const actCount = Object.values(obj.agentActions || {}).reduce((s, arr) => s + (Array.isArray(arr) ? arr.length : 0), 0);
+            const crCount = (() => {
+              try {
+                const raw = obj.callReportStorage && obj.callReportStorage.bimeh_bazar_experts_v2;
+                const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                return Array.isArray(parsed) ? parsed.length : 0;
+              } catch (_) { return 0; }
+            })();
+            prevEl.innerHTML = `<div class="qb-prev-title"><i class="fa-solid fa-file-code"></i> <b>${esc(f.name)}</b> <small>(نسخه ${fa(obj.version || 3)})</small></div>
+              <div class="qb-prev-tags">
+                <span>کارشناسان: <b>${fa((obj.agents || []).length)}</b></span>
+                <span>تیکت: <b>${fa((obj.tickets || []).length)}</b></span>
+                <span>سوشال: <b>${fa((obj.socials || []).length)}</b></span>
+                <span>تماس ثابت: <b>${fa((obj.callFeedbacks || []).length)}</b></span>
+                <span>موقعیتی: <b>${fa((obj.callSituational || []).length)}</b></span>
+                <span>نمرات ماهانه: <b>${fa((obj.monthlyScores || []).length)}</b></span>
+                <span>اقدامات: <b>${fa(actCount)}</b></span>
+                <span>یادآورها: <b>${fa((obj.reminders || []).length)}</b></span>
+                <span>ماه‌های مالی: <b>${fa((obj.fiscalMonths || []).length)}</b></span>
+                <span>کاربران QC: <b>${fa((obj.qcUsers || []).length)}</b></span>
+                ${crCount ? `<span>گزارش تماس: <b>${fa(crCount)}</b> کارشناس</span>` : ''}
+              </div>`;
+          } else {
+            const c = (obj.teleRawData || []).length + (obj.accRawData || []).length + (obj.mlmRawData || []).length;
+            prevEl.innerHTML = `<div class="qb-prev-title"><i class="fa-solid fa-file-code"></i> <b>${esc(f.name)}</b></div><div class="qb-prev-tags"><span>ریت تماس بازیابی: <b>${fa(c)}</b></span></div>`;
+          }
+          ctlEl.hidden = false;
+        } catch (err) {
+          pendingObj = null; ctlEl.hidden = true; prevEl.hidden = true;
+          upInfo.hidden = false; upInfo.className = 'qb-status bad';
+          upInfo.textContent = err.message || 'فایل JSON نامعتبر است';
+        }
+        e.target.value = '';
+      };
+      rd.readAsText(f, 'utf-8');
+    });
+
+    $('#qbApplyBtn', root).addEventListener('click', async () => {
+      if (!pendingObj) return;
+      const btn = $('#qbApplyBtn', root);
+      const modeInput = root.querySelector('input[name="qbMode"]:checked');
+      const mode = modeInput ? modeInput.value : 'replace';
+      btn.disabled = true;
+      upInfo.hidden = false;
+      upInfo.className = 'qb-status';
+      upInfo.innerHTML = '<i class="fa-solid fa-spinner spin"></i> در حال بازیابی همه داده‌ها…';
+      try {
+        const r = pendingKind === 'backup'
+          ? await api.post('/api/backup', { backup: pendingObj, mode })
+          : await api.post('/api/calls', { recovery: pendingObj, mode });
+        if (pendingKind === 'backup' && pendingObj.callReportStorage) {
+          this.applyBrowserCallReportStorage(pendingObj.callReportStorage);
+        }
+        if (api.clearCache) api.clearCache(true);
+        await this.boot();
+        await this.route();
+        upInfo.className = 'qb-status ok';
+        upInfo.innerHTML = pendingKind === 'backup'
+          ? `<i class="fa-solid fa-circle-check"></i> بازیابی کامل انجام شد! (${fa(r.restored.agents)} کارشناس · ${fa(r.restored.tickets)} تیکت · ${fa(r.restored.socials)} سوشال · ${fa(r.restored.calls)} تماس ثابت · ${fa(r.restored.callSituational || 0)} موقعیتی · ${fa(r.restored.monthlyScores || 0)} نمره ماهانه)`
+          : '<i class="fa-solid fa-circle-check"></i> داده‌های تماس با موفقیت بازیابی شدند.';
+        toast.success('همه داده‌های بکاپ با موفقیت روی سامانه بازیابی شدند');
+      } catch (err) {
+        upInfo.className = 'qb-status bad';
+        upInfo.textContent = 'خطا در بازیابی: ' + err.message;
+        toast.error(err.message);
+      }
+      btn.disabled = false;
+    });
   },
 
   register(name, spec) { this.routes[name] = spec; },
@@ -9021,6 +9385,8 @@ const App = {
   /* رویدادهای ثابت پوسته (پیش از ورود هم فعال‌اند) */
   bindChrome() {
     $('#themeToggle').addEventListener('click', () => this.applyTheme(this.theme === 'dark' ? 'light' : 'dark'));
+    const quickBackup = $('#quickBackupBtn');
+    if (quickBackup) quickBackup.addEventListener('click', () => this.openQuickBackup());
     const logout = $('#logoutBtn');
     if (logout) logout.addEventListener('click', () => { if (window.QCAuth) window.QCAuth.logout(); });
     const syncChip = $('#syncChip');
@@ -9131,6 +9497,8 @@ const QCAuth = {
       const visible = $$('.nav-subitem', g).some((a) => !a.hidden);
       g.hidden = !visible;
     });
+    const quickBackup = document.getElementById('quickBackupBtn');
+    if (quickBackup) quickBackup.hidden = !this.can('data');
   },
 
   /* bootstrap آماده‌ی همان ورود؛ App آن را به‌جای درخواست دوباره مصرف می‌کند. */
@@ -9802,7 +10170,7 @@ App.register('dashboard', {
       const wActive = d.weighted && d.weighted.activeWeight;
       const avgAllTxt = primaryScore === '' ? '—' : fa(primaryScore) + ' <small>از ۱۰۰</small>';
       const avgAllLbl = (d.situationalCount > 0 || d.monthlyTicketCount > 0 || d.monthlySocialCount > 0)
-        ? `نمره کل وزن‌دار${wActive && wActive < 100 ? ` (${fa(wActive)}٪ وزن فعال)` : ' (۴۵/۲۵/۱۵/۱۵)'}`
+        ? `نمره کل وزن‌دار${wActive && wActive < 100 ? ' (بخش‌های دارای دیتا)' : ' (۴۵/۲۵/۱۵/۱۵)'}`
         : 'میانگین کل نمرات';
       const tVal = d.monthlyTicketCount > 0 ? fa(d.monthlyTicketCount) + ' ماهانه' : (d.ticketScored ? fa(d.ticketScored) : '—');
       const sVal = d.monthlySocialCount > 0 ? fa(d.monthlySocialCount) + ' ماهانه' : (d.socialScored ? fa(d.socialScored) : '—');
@@ -10855,7 +11223,7 @@ async function render(root) {
           }
         },
         scales: {
-          x: { min: 0, max: 100, grid: { color: 'rgba(34,48,79,.5)' }, ticks: { callback: (v) => v + '٪' } },
+          x: { min: 0, max: 100, grid: {}, ticks: { callback: (v) => v + '٪' } },
           y: { grid: { display: false }, ticks: { font: { size: 11.5 } } }
         }
       }
@@ -10869,7 +11237,7 @@ async function render(root) {
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ' ' + tooltipLabel + ': ' + fa(c.parsed.y) } } },
-        scales: { y: { min: 0, max: 100, grid: { color: 'rgba(34,48,79,.5)' } }, x: { grid: { display: false }, ticks: { maxRotation: 60, font: { size: 10 } } } }
+        scales: { y: { min: 0, max: 100, grid: {} }, x: { grid: { display: false }, ticks: { maxRotation: 60, font: { size: 10 } } } }
       }
     });
   }
@@ -10962,7 +11330,7 @@ ${elementsCardHTML('teal')}`;
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom' } },
-          scales: { y: { grid: { color: 'rgba(34,48,79,.5)' }, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
+          scales: { y: { grid: {}, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
         }
       });
     } else if (F.type === 'call') {
@@ -10985,7 +11353,7 @@ ${elementsCardHTML('teal')}`;
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { position: 'bottom' } },
-          scales: { y: { grid: { color: 'rgba(34,48,79,.5)' }, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
+          scales: { y: { grid: {}, stacked: true }, x: { grid: { display: false }, stacked: true, ticks: { maxRotation: 60, font: { size: 10 } } } }
         }
       });
       /* کارت نمره‌ی اقلام کلی — «کلا روی کدام المان چه نمره‌ای گرفته‌شده» */
@@ -12564,7 +12932,7 @@ async function render(root, arg) {
           <td style="font-size:12px">${esc(lbl)} <span style="color:var(--muted);font-size:10px">(${fa(r.ok)}/${fa(r.total)})</span></td>
           <td style="width:1%;white-space:nowrap;text-align:center">
             <div style="display:flex;align-items:center;gap:8px">
-              <div style="flex:1;height:7px;background:rgba(148,163,184,.12);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
+              <div style="flex:1;height:7px;background:var(--soft);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
               <span style="flex-shrink:0;font-weight:600;font-size:12px;width:44px;text-align:left">${st == null ? '—' : fa(st) + '٪'}</span>
             </div>
           </td>
@@ -12601,7 +12969,7 @@ async function render(root, arg) {
           <td style="font-size:12px">${esc(el.label)} <span style="color:var(--muted);font-size:10px">(${countLabel})</span></td>
           <td style="width:1%;white-space:nowrap;text-align:center">
             <div style="display:flex;align-items:center;gap:8px">
-              <div style="flex:1;height:7px;background:rgba(148,163,184,.12);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
+              <div style="flex:1;height:7px;background:var(--soft);border-radius:999px;overflow:hidden;min-width:120px"><div style="${bar};height:100%;border-radius:999px"></div></div>
               <span style="flex-shrink:0;font-weight:600;font-size:12px;width:48px;text-align:left">${rate == null ? '—' : fa(rate) + '٪'}</span>
             </div>
           </td>
@@ -12644,33 +13012,38 @@ async function render(root, arg) {
       return '';
     };
     const isPartial = w.activeWeight < w.totalWeight;
+    const activePillars = (w.pillars || []).filter(p => p.active);
+    const activeNames = activePillars.map(p => p.label).join('، ');
     return `<div class="card" id="pWeightedCard" style="margin-bottom:16px">
       <div class="card-head teal"><div class="head-icon"><i class="fa-solid fa-scale-balanced"></i></div>
         <div>
-          <h3>ترکیب نمره کل وزن‌دار کارشناس</h3>
-          <div class="sub">وزن رسمی ۴گانه: ثابت تماس ۴۵٪ · موقعیتی ۲۵٪ · پیام‌رسان ۱۵٪ · تیکت ۱۵٪${isPartial ? ` — <b>نرمال‌شده روی ${fa(w.activeWeight)}٪ وزن فعال</b> (بخش‌های بدون داده در مخرج لحاظ نشده‌اند)` : ' — هر ۴ بخش دارای داده (۱۰۰٪ کامل)'}</div>
+          <h3>ترکیب نمره کل کارشناس</h3>
+          <div class="sub">وزن رسمی ۴گانه: ثابت تماس ۴۵٪ · موقعیتی ۲۵٪ · پیام‌رسان ۱۵٪ · تیکت ۱۵٪${isPartial ? ` — <b>بخش‌های بدون دیتا از محاسبه حذف شده‌اند</b> و نمره کل فقط از بخش‌های دارای دیتا (${esc(activeNames)}) محاسبه شده است` : ' — هر ۴ بخش دارای دیتا هستند'}</div>
         </div>
         <div class="spacer"></div>
         <div style="text-align:left">
-          <div style="font-size:11px;color:var(--muted)">نمره نهایی (از ۱۰۰)</div>
+          <div style="font-size:11px;color:var(--muted)">نمره کل نهایی (از ۱۰۰)</div>
           <div style="margin-top:2px">${scorePill(w.score)}</div>
         </div>
       </div>
       <div class="table-wrap"><table class="tbl">
-        <thead><tr><th>بخش ارزیابی</th><th>وزن رسمی</th><th>نمره بخش (از ۱۰۰)</th><th>سهم کسب‌شده</th><th>وضعیت</th></tr></thead>
-        <tbody>${(w.pillars || []).map(p => `<tr style="${p.active ? '' : 'opacity:.6'}">
+        <thead><tr><th>بخش ارزیابی</th><th>وزن رسمی</th><th>نمره بخش (از ۱۰۰)</th><th>سهم در این کارنامه</th><th>وضعیت</th></tr></thead>
+        <tbody>${(w.pillars || []).map(p => {
+          const effShare = p.active && w.activeWeight > 0 ? C.round2(p.weight * 100 / w.activeWeight) : 0;
+          return `<tr style="${p.active ? '' : 'opacity:.65'}">
           <td><b>${esc(p.label)}</b>${srcBadge(p.key)}</td>
           <td>${fa(p.weight)}٪</td>
-          <td>${p.active ? scorePill(p.score) : '—'}</td>
-          <td>${p.active ? `<b>${fa(p.earned)}</b> <small style="color:var(--muted)">از ${fa(p.weight)}</small>` : `<span style="color:var(--muted)">۰ از ${fa(p.weight)}</span>`}</td>
-          <td>${p.active ? '<span class="badge ok">فعال در محاسبه</span>' : '<span class="badge gray">بدون داده</span>'}</td>
-        </tr>`).join('')}
+          <td>${p.active ? scorePill(p.score) : '<span style="color:var(--muted)">—</span>'}</td>
+          <td>${p.active ? `<b>${fa(effShare)}٪</b> <small style="color:var(--muted)">(سهم مؤثر در نمره کل)</small>` : '<span style="color:var(--muted)">از محاسبه حذف شد</span>'}</td>
+          <td>${p.active ? '<span class="badge ok">لحاظ شده در محاسبه</span>' : '<span class="badge gray">دیتایی موجود نیست</span>'}</td>
+        </tr>`;
+        }).join('')}
         <tr style="background:var(--panel-soft);font-weight:700">
-          <td>جمع سهم کسب‌شده / نمره کل نرمال‌شده</td>
-          <td>${fa(w.activeWeight)}٪ <small style="font-weight:400;color:var(--muted)">از ${fa(w.totalWeight)}٪</small></td>
+          <td>نمره کل نهایی کارشناس</td>
+          <td>${fa(activePillars.length)} از ۴ بخش</td>
           <td>${scorePill(w.score)}</td>
-          <td><b>${fa(w.rawWeightedSum)}</b> <small style="font-weight:400;color:var(--muted)">از ${fa(w.activeWeight)}</small></td>
-          <td><span class="badge ${isPartial ? 'info' : 'ok'}">${isPartial ? 'نرمال‌سازی شده' : 'کامل'}</span></td>
+          <td><b>۱۰۰٪</b> <small style="font-weight:400;color:var(--muted)">از بخش‌های دارای دیتا</small></td>
+          <td><span class="badge ${isPartial ? 'info' : 'ok'}">${isPartial ? 'محاسبه از بخش‌های موجود' : 'هر ۴ بخش کامل'}</span></td>
         </tr></tbody>
       </table></div>
     </div>`;
@@ -12762,7 +13135,7 @@ async function render(root, arg) {
     if (!Array.isArray(redlineRows) || !redlineRows.length) return '';
     return `<div class="card" style="margin-bottom:16px">
       <div class="card-head" style="border-color:rgba(248,113,113,.3)">
-        <div class="head-icon" style="background:rgba(248,113,113,.12);color:#f87171"><i class="fa-solid fa-ban"></i></div>
+        <div class="head-icon" style="background:var(--bad-soft);color:var(--bad)"><i class="fa-solid fa-ban"></i></div>
         <div><h3>ردلاین‌ها (${fa(redlineRows.length)} مورد)</h3><div class="sub">علت و جزئیات هر ردلاین — کلیک روی لید = جستجو</div></div></div>
       <div class="table-wrap">
         <table class="tbl"><thead><tr><th>تاریخ</th><th>لید</th><th>نوع</th><th>نمره</th><th>علت ردلاین</th></tr></thead>
@@ -12771,13 +13144,13 @@ async function render(root, arg) {
           <td>${esc(r.leadName || '—')}<div style="font-size:10px;color:var(--muted)" dir="ltr">${esc(r.leadPhone || '')}</div></td>
           <td><span class="tag-team">${FORM_TYPE_FA[r.formType] || r.formType}</span></td>
           <td>${r.score != null ? scorePill(r.score) : '—'}</td>
-          <td style="font-size:12px;color:#fca5a5;max-width:300px">${esc(r.reason || '(ثبت نشده)')}${r.qcComment ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">"${esc(r.qcComment)}"</div>` : ''}</td>
+          <td style="font-size:12px;color:var(--bad);max-width:300px">${esc(r.reason || '(ثبت نشده)')}${r.qcComment ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">"${esc(r.qcComment)}"</div>` : ''}</td>
         </tr>`).join('')}</tbody></table></div></div>`;
   }
 
   function renderProfile(body, d, periodLabel) {
     const a = d.agent;
-    const monthLine = periodLabel && periodLabel !== 'همه دوره‌ها' ? `<span class="tag-team" style="background:rgba(167,139,250,.12);color:#a78bfa;border-color:rgba(167,139,250,.3)"><i class="fa-regular fa-calendar"></i> ${esc(periodLabel)}</span>` : '<span class="tag-team">همه دوره‌ها</span>';
+    const monthLine = periodLabel && periodLabel !== 'همه دوره‌ها' ? `<span class="tag-team" style="background:var(--violet-soft);color:var(--violet)"><i class="fa-regular fa-calendar"></i> ${esc(periodLabel)}</span>` : '<span class="tag-team">همه دوره‌ها</span>';
     const T = d.tickets, S = d.socials, Ph = d.calls, Sit = d.situational || { hasData: false };
 
     const allKeys = [...new Set([
@@ -12841,27 +13214,33 @@ async function render(root, arg) {
         <div class="summary-block kpi-primary" data-kpi="overall">
           <div class="summary-head"><i class="fa-solid fa-scale-balanced"></i><span>نمره کل</span></div>
           <strong>${fmtVal(d.weighted && d.weighted.score)}</strong>
-          <small class="summary-sub">مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی${d.weighted && d.weighted.activeWeight ? ` · ${d.weighted.activeWeight < 100 ? `وزن فعال ${fa(d.weighted.activeWeight)}٪` : '۱۰۰٪ کامل'}` : ''}</small>
+          <small class="summary-sub">${(() => {
+            const act = d.weighted && d.weighted.pillars ? d.weighted.pillars.filter(p => p.active).length : 0;
+            if (!act) return 'دیتایی موجود نیست';
+            return act < 4
+              ? `مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی · فقط ${fa(act)} بخش دارای دیتا (بقیه حذف شدند)`
+              : 'مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی';
+          })()}</small>
         </div>
         <div class="summary-block ${Ph.redlineCount > 0 ? 'kpi-danger' : ''}" data-kpi="fixed">
           <div class="summary-head"><i class="fa-solid fa-headset"></i><span>نمره المان‌های ثابت</span></div>
           <strong>${fmtVal(Ph.avgScore)}</strong>
-          <small class="summary-sub">ضریب ۴۵٪ · ${fa(Ph.count)} تماس${Ph.redlineCount ? ` · ردلاین ${fa(Ph.redlineCount)}` : ''}</small>
+          <small class="summary-sub">${Ph.count ? `ضریب ۴۵٪ · ${fa(Ph.count)} تماس${Ph.redlineCount ? ` · ردلاین ${fa(Ph.redlineCount)}` : ''}` : 'ضریب ۴۵٪ · دیتایی موجود نیست'}</small>
         </div>
         <div class="summary-block" data-kpi="situational">
           <div class="summary-head"><i class="fa-solid fa-sliders"></i><span>نمره المان‌های موقعیتی</span></div>
           <strong>${Sit.hasData ? fmtVal(Sit.avgScore) : '—'}</strong>
-          <small class="summary-sub">ضریب ۲۵٪ · ${Sit.hasData ? `${fa(Sit.formsCount || 0)} فرم${sitPeriodTxt}` : 'بدون داده'}</small>
+          <small class="summary-sub">ضریب ۲۵٪ · ${Sit.hasData ? `${fa(Sit.formsCount || 0)} فرم${sitPeriodTxt}` : 'دیتایی موجود نیست'}</small>
         </div>
         <div class="summary-block ${T.redlineZero > 0 ? 'kpi-warn' : ''}" data-kpi="ticket">
           <div class="summary-head"><i class="fa-solid fa-ticket"></i><span>نمره تیکت</span></div>
           <strong>${fmtVal(T.avgScore)}</strong>
-          <small class="summary-sub">ضریب ۱۵٪ · ${fa(T.count)} ارزیابی${T.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${T.redlineZero ? ` · ردلاین ${fa(T.redlineZero)}` : ''}</small>
+          <small class="summary-sub">${T.avgScore !== '' && T.avgScore != null ? `ضریب ۱۵٪ · ${fa(T.count)} ارزیابی${T.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${T.redlineZero ? ` · ردلاین ${fa(T.redlineZero)}` : ''}` : 'ضریب ۱۵٪ · دیتایی موجود نیست'}</small>
         </div>
         <div class="summary-block ${S.slaReal !== '' && S.slaReal < 70 ? 'kpi-warn' : ''}" data-kpi="social">
           <div class="summary-head"><i class="fa-solid fa-comments"></i><span>نمره سوشال</span></div>
           <strong>${fmtVal(S.avgScore)}</strong>
-          <small class="summary-sub">ضریب ۱۵٪ · ${fa(S.count)} ارزیابی${S.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${S.slaReal === '' ? '' : ` · SLA ${fa(S.slaReal)}٪`}${S.unanswered ? ` · عدم پاسخ ${fa(S.unanswered)}` : ''}</small>
+          <small class="summary-sub">${S.avgScore !== '' && S.avgScore != null ? `ضریب ۱۵٪ · ${fa(S.count)} ارزیابی${S.source === 'monthly_excel' ? ' · اکسل ماهانه' : ''}${S.slaReal === '' ? '' : ` · SLA ${fa(S.slaReal)}٪`}${S.unanswered ? ` · عدم پاسخ ${fa(S.unanswered)}` : ''}` : 'ضریب ۱۵٪ · دیتایی موجود نیست'}</small>
         </div>
       </div>
 
@@ -13020,11 +13399,11 @@ async function render(root, arg) {
     }] : [];
     const w = curData.weighted;
     const weightedSheet = w && w.activeWeight ? [{
-      name: 'نمره کل وزن‌دار',
+      name: 'نمره کل کارشناس',
       rows: [
-        ['بخش ارزیابی', 'وزن رسمی (٪)', 'نمره بخش', 'سهم کسب‌شده', 'وضعیت'],
-        ...(w.pillars || []).map(p => [p.label, p.weight, p.active ? p.score : '', p.active ? p.earned : 0, p.active ? 'فعال' : 'بدون داده']),
-        ['نمره نهایی نرمال‌شده', w.activeWeight, w.score, w.rawWeightedSum, w.activeWeight < w.totalWeight ? 'نرمال‌سازی شده' : 'کامل']
+        ['بخش ارزیابی', 'وزن رسمی (٪)', 'نمره بخش', 'سهم مؤثر در این کارنامه (٪)', 'وضعیت'],
+        ...(w.pillars || []).map(p => [p.label, p.weight, p.active ? p.score : '', p.active ? C.round2(p.weight * 100 / w.activeWeight) : 0, p.active ? 'لحاظ شده در محاسبه' : 'دیتایی موجود نیست']),
+        ['نمره کل نهایی', w.activeWeight, w.score, 100, w.activeWeight < w.totalWeight ? 'محاسبه از بخش‌های دارای دیتا' : 'هر ۴ بخش کامل']
       ]
     }] : [];
     window.QCExport.sheets(`${a.name} — پرونده`, [
@@ -13259,10 +13638,13 @@ async function render(root) {
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));margin-bottom:16px">
     <div class="card">
       <div class="card-head">
-        <div class="head-icon" style="background:rgba(52,211,153,.12);color:#34d399"><i class="fa-solid fa-file-import"></i></div>
-        <div><h3>بک‌اپ کامل سامانه</h3><div class="sub">دانلود همه دیتا (تیکت، سوشال، تماس، کارشناس‌ها، تنظیمات) به‌صورت فایل JSON</div></div>
+        <div class="head-icon" style="background:var(--good-soft);color:var(--good)"><i class="fa-solid fa-file-import"></i></div>
+        <div><h3>بک‌اپ کامل سامانه (انتقال به نسخه جدید)</h3><div class="sub">دانلود یکجای همه دیتا (تیکت، سوشال، تماس ثابت و موقعیتی، نمرات ماهانه، کارشناسان، اقدامات، ماه‌های مالی، کاربران و تنظیمات)</div></div>
       </div>
       <div class="card-pad" style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;gap:9px;flex-wrap:wrap">
+          <button class="btn primary" id="btnBackupAll"><i class="fa-solid fa-cloud-arrow-down"></i> دانلود فوری بکاپ کامل همه داده‌ها (یک کلیک)</button>
+        </div>
         <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
           <div class="field"><label>از تاریخ (اختیاری)</label>
             <div class="date-f"><input class="input" id="bupFrom" dir="ltr" style="text-align:right;padding-left:34px" inputmode="numeric" placeholder="۱۴۰۵/۰۱/۰۱">
@@ -13276,24 +13658,24 @@ async function render(root) {
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input class="input" id="backupYear" inputmode="numeric" dir="ltr" style="width:90px" value="${C.todayJalali().jy}" aria-label="سال بک اپ">
           <select class="input" id="backupMonth" style="width:125px" aria-label="ماه بک اپ">${C.MONTHS_FA.map((name,index)=>`<option value="${index+1}" ${index+1===C.todayJalali().jm?'selected':''}>${name}</option>`).join('')}</select>
           <button class="btn soft" id="backupMonthSet">انتخاب کل ماه</button><button class="btn ghost" id="backupUseGlobal">استفاده از بازه گزارش</button></div>
-        <div class="note" style="margin:0"><i class="fa-solid fa-circle-info"></i> اگر تاریخ نزنی، کل دیتا دانلود می‌شود. با تاریخ فقط رکوردهای آن بازه.</div>
+        <div class="note" style="margin:0"><i class="fa-solid fa-circle-info"></i> برای انتقال به نسخه جدید کد، دکمه آبی «دانلود فوری بکاپ کامل» را بزنید تا کل داده‌های سامانه یکجا ذخیره شوند.</div>
         <div style="display:flex;gap:9px;flex-wrap:wrap">
-          <button class="btn success-soft" id="btnBackup"><i class="fa-solid fa-floppy-disk"></i> دانلود فایل بک‌اپ</button>
+          <button class="btn success-soft" id="btnBackup"><i class="fa-solid fa-floppy-disk"></i> دانلود فایل بک‌اپ (با فیلتر تاریخ بالا)</button>
         </div>
       </div>
     </div>
 
     <div class="card">
       <div class="card-head">
-        <div class="head-icon" style="background:rgba(251,191,36,.12);color:#fbbf24"><i class="fa-solid fa-file-export"></i></div>
-        <div><h3>بازیابی / ایمپورت دیتا</h3><div class="sub">فایل بک‌اپ JSON که قبلاً از همین‌جا دانلود کردی</div></div>
+        <div class="head-icon" style="background:var(--warn-soft);color:var(--warn)"><i class="fa-solid fa-file-export"></i></div>
+        <div><h3>بازیابی / آپلود روی نسخه جدید</h3><div class="sub">فایل بک‌اپ JSON که از نسخه قبلی دانلود کرده‌اید را اینجا آپلود کنید</div></div>
       </div>
       <div class="card-pad" style="display:flex;flex-direction:column;gap:12px">
         <div class="note" style="margin:0">
           <i class="fa-solid fa-circle-info"></i>
-          <span>فایل <b>بک‌اپ کامل</b> سامانه را انتخاب کنید — کل دیتای مرکز (تیکت، سوشال، ریت تماس) با آن جایگزین یا ادغام می‌شود.</span>
+          <span>فایل <b>بک‌اپ کامل</b> سامانه را انتخاب کنید — همه داده‌ها (تیکت، سوشال، ریت تماس ثابت و موقعیتی، نمرات ماهانه، کارشناسان، اقدامات، یادآورها، ماه‌های مالی، کاربران QC و تنظیمات) یکجا بازیابی یا ادغام می‌شوند.</span>
         </div>
-        <button class="btn soft" id="btnRestoreSel"><i class="fa-solid fa-file-arrow-up" style="color:#14b8a6"></i> انتخاب فایل بازیابی…</button>
+        <button class="btn soft" id="btnRestoreSel"><i class="fa-solid fa-file-arrow-up"></i> انتخاب و آپلود فایل بکاپ…</button>
         <input type="file" id="restoreInp" accept=".json,application/json" hidden>
         <div id="restoreResult" style="display:none;font-size:12px;padding:9px 12px;border-radius:9px"></div>
       </div>
@@ -13409,7 +13791,7 @@ async function render(root) {
     const resEl = $('#upResult');
     if (!payload.length) {
       resEl.style.display = '';
-      resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = '#f87171';
+      resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = 'var(--bad)';
       resEl.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> هیچ فایلی خوانده نشد — ${esc((errs || []).join('، '))}`;
       return false;
     }
@@ -13430,22 +13812,22 @@ async function render(root) {
       const kindFa = (k) => k === 'situational' ? 'موقعیتی' : (k === 'ticket_monthly' ? 'ماهانه تیکت' : (k === 'social_monthly' ? 'ماهانه پیام‌رسان' : 'ثابت'));
       resEl.style.display = '';
       if (okF.length) {
-        resEl.style.background = 'rgba(52,211,153,.08)'; resEl.style.color = '#34d399';
+        resEl.style.background = 'rgba(52,211,153,.08)'; resEl.style.color = 'var(--ok)';
         resEl.innerHTML = `<i class="fa-solid fa-circle-check"></i> آپلود موفق: ` +
           okF.map((x) => {
             const rangeTxt = (x.periodFrom || x.periodTo) ? ` · بازه: ${fa(x.periodFrom || '—')} تا ${fa(x.periodTo || '—')}` : '';
             return `${esc(x.name)} → ${fa(x.count)} ردیف ${kindFa(x.kind)} (${formFa[x.type] || x.type}${rangeTxt})`;
           }).join(' | ');
       } else {
-        resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = '#f87171';
+        resEl.style.background = 'rgba(248,113,113,.08)'; resEl.style.color = 'var(--bad)';
         resEl.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> هیچ ردیف معتبری وارد نشد.`;
       }
       if (badF.length || (errs && errs.length)) {
-        resEl.innerHTML += `<div style="margin-top:7px;color:#fbbf24;font-size:11px"><i class="fa-solid fa-triangle-exclamation"></i> نادیده‌گرفته: ${esc([...badF.map((x) => x.name + ' (' + (x.reason || 'نامعتبر') + ')'), ...(errs || [])].join('، '))}</div>`;
+        resEl.innerHTML += `<div style="margin-top:7px;color:var(--warn);font-size:11px"><i class="fa-solid fa-triangle-exclamation"></i> نادیده‌گرفته: ${esc([...badF.map((x) => x.name + ' (' + (x.reason || 'نامعتبر') + ')'), ...(errs || [])].join('، '))}</div>`;
       }
       const unlinkedSit = okF.filter((x) => x.kind === 'situational' && !x.periodFrom && !x.periodTo);
       if (unlinkedSit.length) {
-        resEl.innerHTML += `<div style="margin-top:7px;color:#fbbf24;font-size:11.5px"><i class="fa-solid fa-circle-info"></i> فایل موقعیتی بدون بازه تاریخ ثبت شد؛ برای نمایش در بازه‌ی ماهانه، فایل ثابت هم‌تیم را هم آپلود کنید یا بازه‌ی گزارش را روی «همه تاریخ‌ها» بگذارید.</div>`;
+        resEl.innerHTML += `<div style="margin-top:7px;color:var(--warn);font-size:11.5px"><i class="fa-solid fa-circle-info"></i> فایل موقعیتی بدون بازه تاریخ ثبت شد؛ برای نمایش در بازه‌ی ماهانه، فایل ثابت هم‌تیم را هم آپلود کنید یا بازه‌ی گزارش را روی «همه تاریخ‌ها» بگذارید.</div>`;
       }
       const added = okF.reduce((n, x) => n + (x.changes ? (x.changes.added || 0) : x.count), 0);
       const updated = okF.reduce((n, x) => n + (x.changes ? (x.changes.updated || 0) : 0), 0);
@@ -13852,6 +14234,15 @@ async function render(root) {
   $('#backupUseGlobal',root).addEventListener('click',()=>{$('#bupFrom').value=App.dateRange.from;$('#bupTo').value=App.dateRange.to;});
 
   /* ------- بک‌اپ کامل ------- */
+  $('#btnBackupAll').addEventListener('click', async () => {
+    const b = $('#btnBackupAll'); b.disabled = true;
+    try {
+      const data = await App.downloadFullBackup();
+      toast.success(`بکاپ کامل دانلود شد — ${fa((data.agents || []).length)} کارشناس / ${fa((data.tickets || []).length)} تیکت / ${fa((data.socials || []).length)} سوشال / ${fa((data.callFeedbacks || []).length)} تماس ثابت / ${fa((data.callSituational || []).length)} موقعیتی / ${fa((data.monthlyScores || []).length)} نمره ماهانه`);
+    } catch (e) { toast.error(e.message); }
+    b.disabled = false;
+  });
+
   $('#btnBackup').addEventListener('click', async () => {
     const b = $('#btnBackup'); b.disabled = true;
     try {
@@ -13860,16 +14251,7 @@ async function render(root) {
       const fromJ=C.parseDate(rawRange.from),toJ=C.parseDate(rawRange.to);
       const from = fromJ ? C.formatJalali(fromJ) : '';
       const to = toJ ? C.formatJalali(toJ) : '';
-      const qs = (from || to) ? '?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to) : '';
-      const data = await api.get('/api/backup' + qs);
-      const dateStr = (data.exportedAt || '').slice(0, 10).replace(/-/g, '');
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `crm-qc-backup-${from?from.replaceAll('/','-'):'all'}_${to?to.replaceAll('/','-'):dateStr}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const data = await App.downloadFullBackup({ from, to });
       toast.success(`بک‌اپ دانلود شد — ${fa(data.agents.length)} کارشناس / ${fa(data.tickets.length)} تیکت / ${fa(data.socials.length)} سوشال / ${fa((data.callFeedbacks || []).length)} تماس`);
     } catch (e) { toast.error(e.message); }
     b.disabled = false;
@@ -13889,14 +14271,15 @@ async function render(root) {
         if (!isBackup && !isRecovery) throw new Error('این فایل بک‌اپ سامانه یا فایل بازیابی پنل ریت نیست');
         const resEl = $('#restoreResult');
         resEl.style.display = '';
-        const summary=isBackup ? `${(obj.tickets||[]).length} تیکت، ${(obj.socials||[]).length} سوشال، ${(obj.callFeedbacks||[]).length} ریت تماس · بازه ${obj.range&&obj.range.from||'ابتدا'} تا ${obj.range&&obj.range.to||'انتها'}` : `${(obj.teleRawData||[]).length+(obj.accRawData||[]).length+(obj.mlmRawData||[]).length} ریت تماس`;
-        const mode=await UI.confirmImport(isBackup?'ورود آرشیو / بک‌اپ':'ورود فایل ریت',summary,isBackup?'تمام دیتای فعلیِ تیکت، سوشال، تماس و فهرست کارشناسان/تنظیمات با محتویات این بک‌اپ جایگزین می‌شود.':'فقط ریت‌های منبع qc_recovery.json جایگزین می‌شوند؛ سایر منابع محفوظ‌اند.');
+        const summary=isBackup ? `${(obj.agents||[]).length} کارشناس، ${(obj.tickets||[]).length} تیکت، ${(obj.socials||[]).length} سوشال، ${(obj.callFeedbacks||[]).length} تماس ثابت، ${(obj.callSituational||[]).length} موقعیتی، ${(obj.monthlyScores||[]).length} نمره ماهانه · بازه ${obj.range&&obj.range.from||'ابتدا'} تا ${obj.range&&obj.range.to||'انتها'}` : `${(obj.teleRawData||[]).length+(obj.accRawData||[]).length+(obj.mlmRawData||[]).length} ریت تماس`;
+        const mode=await UI.confirmImport(isBackup?'ورود آرشیو / بک‌اپ کامل':'ورود فایل ریت',summary,isBackup?'تمام دیتای فعلی سامانه (تیکت، سوشال، تماس ثابت و موقعیتی، نمرات ماهانه، کارشناسان، اقدامات، ماه‌های مالی و تنظیمات) با محتویات این بک‌اپ جایگزین می‌شود.':'فقط ریت‌های منبع qc_recovery.json جایگزین می‌شوند؛ سایر منابع محفوظ‌اند.');
         if(!mode){resEl.textContent='عملیات لغو شد؛ دیتای فعلی تغییر نکرد.';return;}
         try {
           const r=isBackup?await api.post('/api/backup',{backup:obj,mode}):await api.post('/api/calls',{recovery:obj,mode});
+          if (isBackup && obj.callReportStorage && App.applyBrowserCallReportStorage) App.applyBrowserCallReportStorage(obj.callReportStorage);
           if(!root.isConnected)return;
           resEl.style.background='var(--good-soft)';resEl.style.color='var(--good)';
-          resEl.textContent=isBackup?`${mode==='append'?'ادغام':'جایگزینی'} موفق — اکنون ${r.restored.tickets} تیکت، ${r.restored.socials} سوشال، ${r.restored.calls} ریت تماس و ${r.restored.agents} کارشناس موجود است.`:'ورود ریت با روش انتخاب‌شده انجام شد.';
+          resEl.textContent=isBackup?`${mode==='append'?'ادغام':'جایگزینی'} موفق — اکنون ${r.restored.tickets} تیکت، ${r.restored.socials} سوشال، ${r.restored.calls} تماس ثابت، ${r.restored.callSituational || 0} موقعیتی، ${r.restored.monthlyScores || 0} نمره ماهانه و ${r.restored.agents} کارشناس موجود است.`:'ورود ریت با روش انتخاب‌شده انجام شد.';
           toast.success(mode==='append'?'داده اضافه شد؛ آرشیو قبلی محفوظ است':'داده با تأیید شما جایگزین شد');
           await App.boot();await loadStatus();loadFiles();
         } catch(error){resEl.style.color='var(--bad)';resEl.textContent='خطا: '+error.message;}
@@ -13991,12 +14374,12 @@ const FORM_TABS = [
 ];
 const FORM_FA = { tele: 'Telesales', account: 'اکانت', mlm: 'MLM' };
 
-function heatColor(rate) {
-  if (rate == null) return 'background:rgba(30,41,59,.5);color:var(--muted)';
-  if (rate >= 50) return 'background:rgba(248,113,113,.4);color:#fecaca';
-  if (rate >= 25) return 'background:rgba(251,191,36,.32);color:#fde68a';
-  if (rate >= 8) return 'background:rgba(251,146,60,.18);color:#fdba74';
-  return 'background:rgba(52,211,153,.12);color:#6ee7b7';
+function heatClass(rate) {
+  if (rate == null) return 'hm-cell hm-none';
+  if (rate >= 50) return 'hm-cell hm-high';
+  if (rate >= 25) return 'hm-cell hm-med';
+  if (rate >= 8) return 'hm-cell hm-low';
+  return 'hm-cell hm-ok';
 }
 
 function heatVal(cell) {
@@ -14114,13 +14497,13 @@ async function render(root) {
 
     const kpiRow = `
     <div class="analysis-kpis">
-      ${kpi('fa-phone-volume', 'تعداد ریت تماس', fa(k.totalCalls || 0), '#38bdf8')}
-      ${kpi('fa-star-half-stroke', 'میانگین نمره ثابت', k.avgScore === '' ? '—' : fa(k.avgScore), '#34d399')}
-      ${k.situationalCount > 0 ? kpi('fa-sliders', 'میانگین نمره موقعیتی', k.situationalAvg === '' ? '—' : fa(k.situationalAvg), '#818cf8') : ''}
-      ${kpi('fa-ban', 'ردلاین', fa(k.redlineCount || 0), '#f87171')}
-      ${kpi('fa-user-check', 'کارشناسان ارزیابی شده', fa(k.expertsWithData || 0), '#a78bfa')}
-      ${kpi('fa-comment-dots', 'دارای کامنت QC', fa(k.withComment || 0), '#fbbf24')}
-      ${kpi('fa-headphones', 'دارای زمان شنود', fa(k.listeningCalls || 0), '#f472b6')}
+      ${kpi('fa-phone-volume', 'تعداد ریت تماس', fa(k.totalCalls || 0), 'var(--brand)')}
+      ${kpi('fa-star-half-stroke', 'میانگین نمره ثابت', k.avgScore === '' ? '—' : fa(k.avgScore), 'var(--ok)')}
+      ${k.situationalCount > 0 ? kpi('fa-sliders', 'میانگین نمره موقعیتی', k.situationalAvg === '' ? '—' : fa(k.situationalAvg), 'var(--violet)') : ''}
+      ${kpi('fa-ban', 'ردلاین', fa(k.redlineCount || 0), 'var(--bad)')}
+      ${kpi('fa-user-check', 'کارشناسان ارزیابی شده', fa(k.expertsWithData || 0), 'var(--violet)')}
+      ${kpi('fa-comment-dots', 'دارای کامنت QC', fa(k.withComment || 0), 'var(--warn)')}
+      ${kpi('fa-headphones', 'دارای زمان شنود', fa(k.listeningCalls || 0), 'var(--pink)')}
     </div>`;
 
     /* جدول‌های ستون افقی (هیت‌مپ) — تنها نمای معیارها */
@@ -14142,7 +14525,7 @@ async function render(root) {
             <tr class="agent-row" data-agent="${esc(a.name)}" style="cursor:pointer" title="باز کردن پرونده ${esc(a.name)}">
               <td><span class="cell-main">${esc(a.name)}</span>${a.team ? ` <span class="tag-team">${esc(QCParse.displayTeam(a.team))}</span>` : ''}<div style="font-size:10px;color:var(--muted)">${fa(a.count)} ریت</div></td>
               <td>${a.avg === '' ? '—' : scorePill(a.avg)}</td>
-              ${a.cells.map((c) => `<td style="${heatColor(c ? c.errorRate : null)};text-align:center;border-radius:4px">${heatVal(c)}</td>`).join('')}
+              ${a.cells.map((c) => `<td class="${heatClass(c ? c.errorRate : null)}" style="border-radius:4px">${heatVal(c)}</td>`).join('')}
             </tr>`).join('')}
           </tbody></table></div>
       </div>`;
@@ -14165,7 +14548,7 @@ async function render(root) {
             <tr class="agent-row" data-agent="${esc(a.name)}" style="cursor:pointer" title="باز کردن پرونده ${esc(a.name)}">
               <td><span class="cell-main">${esc(a.name)}</span>${a.team ? ` <span class="tag-team">${esc(QCParse.displayTeam(a.team))}</span>` : ''}<div style="font-size:10px;color:var(--muted)">${fa(a.formsCount)} فرم</div></td>
               <td>${a.situationalAvg === '' ? '—' : scorePill(a.situationalAvg)}</td>
-              ${a.cells.map((c) => `<td style="${heatColor(c ? c.errorRate : null)};text-align:center;border-radius:4px" title="${c ? fa(c.n) + ' مورد · رعایت ' + fa(c.rate) + '٪' : 'موضوعیت نداشته (n=0)'}">${c ? `${fa(c.errorRate)}٪<div style="font-size:9px;opacity:.75">n=${fa(c.n)}</div>` : '—'}</td>`).join('')}
+              ${a.cells.map((c) => `<td class="${heatClass(c ? c.errorRate : null)}" style="border-radius:4px" title="${c ? fa(c.n) + ' مورد · رعایت ' + fa(c.rate) + '٪' : 'موضوعیت نداشته (n=0)'}">${c ? `${fa(c.errorRate)}٪<div style="font-size:9px;opacity:.75">n=${fa(c.n)}</div>` : '—'}</td>`).join('')}
             </tr>`).join('')}
           </tbody></table></div>
       </div>`;
@@ -14197,16 +14580,16 @@ async function render(root) {
     const rls = an.redlines || [];
     const redlineSection = `
       <div class="card" style="margin-bottom:16px">
-        <div class="card-head"><div class="head-icon" style="background:rgba(248,113,113,.12);color:#f87171"><i class="fa-solid fa-ban"></i></div>
+        <div class="card-head"><div class="head-icon" style="background:var(--bad-soft);color:var(--bad)"><i class="fa-solid fa-ban"></i></div>
           <div><h3>ردلاین‌ها</h3><div class="sub">${fa(rls.length)} مورد — مرتب‌شده بر اساس جدیدترین</div></div></div>
         <div class="card-pad">
           ${rls.length ? `<div style="display:flex;flex-direction:column;gap:8px">${rls.slice(0, 30).map((r) => `
-            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(248,113,113,.25);border-radius:10px;background:rgba(248,113,113,.05)">
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(248,113,113,.28);border-radius:10px;background:var(--bad-soft)">
               <span class="badge bad" style="margin-top:2px">ردلاین</span>
               <div style="flex:1;font-size:12px">
                 <b class="agent-row" data-agent="${esc(r.expertName)}" style="cursor:pointer;color:var(--brand)">${esc(r.expertName)}</b>
                 <span style="color:var(--muted)"> · ${esc(FORM_FA[r.formType] || r.formType || '—')} · نمره ${r.score != null ? esc(fa(r.score)) : '—'}</span>
-                <div style="color:#fca5a5;margin-top:4px">${esc(r.reason || '(علت ثبت نشده)')}</div>
+                <div style="color:var(--bad);margin-top:4px">${esc(r.reason || '(علت ثبت نشده)')}</div>
                 <div style="font-size:10px;color:var(--muted);margin-top:4px">لید: ${esc(r.leadName || '—')}${r.leadPhone ? ' (' + esc(r.leadPhone) + ')' : ''} · ${esc(r.date || '—')}</div>
               </div>
             </div>`).join('')}</div>
@@ -14219,11 +14602,11 @@ async function render(root) {
     const cmts = an.comments || [];
     const commentSection = `
       <div class="card">
-        <div class="card-head"><div class="head-icon" style="background:rgba(251,191,36,.12);color:#fbbf24"><i class="fa-solid fa-comment-dots"></i></div>
+        <div class="card-head"><div class="head-icon" style="background:var(--warn-soft);color:var(--warn)"><i class="fa-solid fa-comment-dots"></i></div>
           <div><h3>کامنت‌های کارشناس QC</h3><div class="sub">${fa(cmts.length)} مورد دارای کامنت یا المان ضعیف — نمایش آخرین ۲۵ مورد</div></div></div>
         <div class="card-pad">
           ${cmts.length ? `<div style="display:flex;flex-direction:column;gap:8px">${cmts.slice(0, 25).map((r) => `
-            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid rgba(148,163,184,.15);border-radius:10px;">
+            <div style="display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line-soft);border-radius:10px;background:var(--panel-2)">
               <div style="flex:1;font-size:12px">
                 <b class="agent-row" data-agent="${esc(r.expertName)}" style="cursor:pointer;color:var(--brand)">${esc(r.expertName)}</b>
                 <span style="color:var(--muted)"> · ${esc(FORM_FA[r.formType] || r.formType || '—')} · نمره ${r.score != null ? esc(fa(r.score)) : '—'}</span>
@@ -15015,9 +15398,9 @@ function normTeamKey(teamName) {
 }
 function teamBadge(t) {
   const k = normTeamKey(t);
-  const colors = { tele: ['#38bdf8', 'rgba(56,189,248,.12)'], account: ['#a78bfa', 'rgba(167,139,250,.12)'], mlm: ['#34d399', 'rgba(52,211,153,.12)'] };
-  const cx = colors[k] || ['#6b7ba0', 'rgba(107,123,160,.1)'];
-  return `<span class="tag-team" style="background:${cx[1]};color:${cx[0]};border-color:${cx[0]}33">${esc(t)}</span>`;
+  const colors = { tele: ['var(--brand)', 'var(--brand-soft)'], account: ['var(--violet)', 'var(--violet-soft)'], mlm: ['var(--good)', 'var(--good-soft)'] };
+  const cx = colors[k] || ['var(--muted)', 'var(--soft)'];
+  return `<span class="tag-team" style="background:${cx[1]};color:${cx[0]}">${esc(t)}</span>`;
 }
 
 /* نام‌های کارشناس QC مسئول یک کارشناس — همان ستون qcAgents تب Agents */

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>گزارش تماس روزانه تیم ها / شرکای بیمه بازار</title>
-    <link rel="icon" type="image/png" href="favicon.png?v=2"><link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="icon" type="image/png" href="favicon.png?v=4"><link rel="shortcut icon" type="image/png" href="favicon.png?v=4"><link rel="apple-touch-icon" href="apple-touch-icon.png">
     <!-- Libraries -->
     <script src="vendor/xlsx.full.min.js"></script>
     <script src="vendor/exceljs.min.js"></script>
@@ -3088,6 +3088,11 @@
             const activeOps = results.filter(r => r.totalCalls > 0 || r.callsOver60s > 0);
             const chartOps = activeOps.length > 0 ? activeOps : results;
             
+            const isLightTheme = document.documentElement.dataset.theme === 'light';
+            const chartInk = isLightTheme ? '#1c2c42' : '#ffffff';
+            const chartGrid = isLightTheme ? '#dce6f1' : '#334155';
+            const chartBorder = isLightTheme ? '#ffffff' : '#1e2937';
+            const chartRateInk = isLightTheme ? '#633cc2' : '#c084fc';
             const names = chartOps.map(r => r.name);
             const over60sData = chartOps.map(r => r.callsOver60s);
             if (avgDurationChart) avgDurationChart.destroy();
@@ -3103,7 +3108,7 @@
                             '#06b6d4', '#84cc16', '#f97316', '#6366f1', '#14b8a6',
                             '#38bdf8', '#a855f7', '#fbbf24', '#f43f5e', '#22c55e'
                         ],
-                        borderColor: '#1e2937',
+                        borderColor: chartBorder,
                         borderWidth: 2
                     }]
                 },
@@ -3117,12 +3122,13 @@
                         legend: {
                             position: 'bottom',
                             labels: {
-                                color: '#ffffff',
+                                color: chartInk,
                                 padding: 8,
                                 boxWidth: 12,
                                 font: { family: 'Vazirmatn', size: 11, weight: 'bold' },
                                 generateLabels: (chart) => {
                                     const data = chart.data;
+                                    const lblColor = document.documentElement.dataset.theme === 'light' ? '#1c2c42' : '#ffffff';
                                     if (data.labels.length && data.datasets.length) {
                                         return data.labels.map((label, i) => {
                                             const meta = chart.getDatasetMeta(0);
@@ -3133,8 +3139,8 @@
                                                 fillStyle: style.backgroundColor,
                                                 strokeStyle: style.borderColor,
                                                 lineWidth: style.borderWidth,
-                                                fontColor: '#ffffff',
-                                                color: '#ffffff',
+                                                fontColor: lblColor,
+                                                color: lblColor,
                                                 hidden: isNaN(val) || meta.data[i].hidden,
                                                 index: i
                                             };
@@ -3165,21 +3171,21 @@
                 data: {
                     labels: sortedBuckets,
                     datasets: [
-                        { label: 'تماس کل', data: bTotal, borderColor: '#60a5fa', tension: 0.3, yAxisID: 'y' },
-                        { label: 'تماس موفق', data: bSuccess, borderColor: '#4ade80', tension: 0.3, yAxisID: 'y' },
-                        { label: 'درصد پاسخگویی', data: bRate, borderColor: '#c084fc', tension: 0.3, yAxisID: 'y1' }
+                        { label: 'تماس کل', data: bTotal, borderColor: '#2563eb', tension: 0.3, yAxisID: 'y' },
+                        { label: 'تماس موفق', data: bSuccess, borderColor: '#16a34a', tension: 0.3, yAxisID: 'y' },
+                        { label: 'درصد پاسخگویی', data: bRate, borderColor: chartRateInk, tension: 0.3, yAxisID: 'y1' }
                     ]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     scales: {
-                        x: { ticks: { color: '#ffffff', font: { family: 'Vazirmatn', size: 10 } } },
-                        y: { type: 'linear', position: 'left', grid: { color: '#334155' }, ticks: { color: '#ffffff', font: { size: 10 } } },
-                        y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#c084fc', font: { size: 10 }, callback: v => v + '%' } }
+                        x: { ticks: { color: chartInk, font: { family: 'Vazirmatn', size: 10 } }, grid: { color: chartGrid } },
+                        y: { type: 'linear', position: 'left', grid: { color: chartGrid }, ticks: { color: chartInk, font: { size: 10 } } },
+                        y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, ticks: { color: chartRateInk, font: { size: 10 }, callback: v => v + '%' } }
                     },
                     plugins: {
-                        legend: { position: 'top', labels: { color: '#ffffff', boxWidth: 12, font: { family: 'Vazirmatn', size: 11, weight: 'bold' } } }
+                        legend: { position: 'top', labels: { color: chartInk, boxWidth: 12, font: { family: 'Vazirmatn', size: 11, weight: 'bold' } } }
                     }
                 }
             });
@@ -3198,7 +3204,7 @@
             
             const canvas = await html2canvas(tContainer, {
                 scale: 2.2,
-                backgroundColor: '#0f172a',
+                backgroundColor: document.documentElement.dataset.theme === 'light' ? '#edf2f8' : '#0f172a',
                 scrollX: 0,
                 scrollY: 0,
                 windowWidth: Math.max(1480, tContainer.scrollWidth + 60)

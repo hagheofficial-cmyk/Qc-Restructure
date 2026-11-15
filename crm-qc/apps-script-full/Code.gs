@@ -2533,6 +2533,7 @@ function restore(db, backup, mode) {
   const sameOrigin = !!currentId && currentId === b.datasetId;
   if (mode === 'replace') {
     if (b.settings) { db.settings = Object.assign({}, db.settings, b.settings); if(!own(b.settings,'callCriteria')) delete db.settings.callCriteria; }
+    if (b.lists && typeof b.lists === 'object' && !Array.isArray(b.lists)) db.lists = clone(b.lists);
     db.agents = b.agents; db.tickets = b.tickets; db.socials = b.socials; db.callFeedbacks = b.callFeedbacks;
     db.callSituational = Array.isArray(b.callSituational) ? b.callSituational : [];
     db.monthlyScores = Array.isArray(b.monthlyScores) ? b.monthlyScores : [];
@@ -2541,6 +2542,13 @@ function restore(db, backup, mode) {
     db.agentActions = b.agentActions || {};
     db.actionTypes = Array.isArray(b.actionTypes) ? b.actionTypes.slice() : null; // null ⇒ پیش‌فرض‌ها در ensure
     db.reminders = Array.isArray(b.reminders) ? b.reminders : [];
+    if (Array.isArray(b.fiscalMonths)) db.fiscalMonths = clone(b.fiscalMonths);
+    if (Array.isArray(b.elements)) db.elements = clone(b.elements);
+    // حفظ ایمنی: فقط وقتی بک‌اپ فهرست غیرخالی و دارای مدیر دارد جایگزین شود تا ورود Apps Script قفل نشود
+    if (Array.isArray(b.qcUsers) && b.qcUsers.length) {
+      const hasAdmin = b.qcUsers.some(u => u && u.role === 'admin' && u.active !== false);
+      if (hasAdmin || !Array.isArray(db.qcUsers) || !db.qcUsers.length) db.qcUsers = clone(b.qcUsers);
+    }
     db.callImport = b.callImport || null; db.callRaw = null;
   } else {
     ['tickets','socials','callFeedbacks'].forEach(field=>b[field].forEach(row=>{const nameField=field==='callFeedbacks'?'expertName':'agentName';const person=P.resolveExpert(db.agents||[],row[nameField]).agent;if(person&&person.name!==row[nameField]){row[field==='callFeedbacks'?'sourceExpertName':'sourceAgentName']=row[nameField];row[nameField]=person.name;}}));
@@ -2590,6 +2598,23 @@ function restore(db, backup, mode) {
     db.reminders = (db.reminders || []).concat((Array.isArray(b.reminders) ? b.reminders : []).filter((x) => {
       const sig = remSig(x); if (remSeen.has(sig)) return false; remSeen.add(sig); return true;
     }));
+    // ماه‌های مالی: افزودن بازه‌های جدید بدون تکرار
+    if (Array.isArray(b.fiscalMonths) && b.fiscalMonths.length) {
+      db.fiscalMonths = Array.isArray(db.fiscalMonths) ? db.fiscalMonths : [];
+      const fmSeen = new Set(db.fiscalMonths.map(x => stable([x.name, x.from, x.to])));
+      b.fiscalMonths.forEach(x => {
+        const sig = stable([x.name, x.from, x.to]);
+        if (!fmSeen.has(sig)) { db.fiscalMonths.push(clone(x)); fmSeen.add(sig); }
+      });
+    }
+    // فهرست‌های پایه: ادغام بدون حذف مقادیر موجود
+    if (b.lists && typeof b.lists === 'object' && !Array.isArray(b.lists)) {
+      db.lists = db.lists || {};
+      Object.keys(b.lists).forEach(k => {
+        if (['__proto__','prototype','constructor'].includes(k)) return;
+        if (Array.isArray(b.lists[k])) db.lists[k] = Array.from(new Set((db.lists[k] || []).concat(b.lists[k])));
+      });
+    }
     // ادغام ماهانه تنظیمات و تیم/داخلی موجود را تغییر نمی‌دهد.
   }
   db.seq = db.seq || {};
@@ -2600,7 +2625,21 @@ function restore(db, backup, mode) {
   db.reminders = db.reminders || [];
   db.seq.reminder = resequence(db.reminders, db.seq.reminder);
   db.registryCleared = db.agents.length === 0;
-  return { ok: true, mode, changes: counts, restored: { agents: db.agents.length, tickets: db.tickets.length, socials: db.socials.length, calls: db.callFeedbacks.length, callSituational: (db.callSituational || []).length, monthlyScores: (db.monthlyScores || []).length } };
+  return {
+    ok: true, mode, changes: counts,
+    restored: {
+      agents: db.agents.length,
+      tickets: db.tickets.length,
+      socials: db.socials.length,
+      calls: db.callFeedbacks.length,
+      callSituational: (db.callSituational || []).length,
+      monthlyScores: (db.monthlyScores || []).length,
+      actions: actions.length,
+      reminders: db.reminders.length,
+      fiscalMonths: (db.fiscalMonths || []).length,
+      qcUsers: (db.qcUsers || []).length
+    }
+  };
 }
 function calls(db, incoming, mode, sourceFile) {
   requireMode(mode);
@@ -4831,9 +4870,13 @@ function dispatch(method, url, body) {
     const to = q.to || '';
     const inRange = (d) => R.inRange(d, from, to);
     return clone({
-      schema: 'crm-qc-backup', version: 3, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
+      schema: 'crm-qc-backup', version: 4, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
       range: { from: from || null, to: to || null },
-      settings: db.settings, agents: db.agents, qcAgents: db.qcAgents,
+      settings: db.settings, lists: db.lists || {},
+      agents: db.agents, qcAgents: db.qcAgents,
+      qcUsers: db.qcUsers || [],
+      fiscalMonths: db.fiscalMonths || [],
+      elements: db.elements || [],
       agentActions: db.agentActions || {},
       actionTypes: X.actionTypes(db),
       reminders: X.reminderList(db),
@@ -5397,10 +5440,10 @@ var QC_GAS_ANALYSIS_MAX_CHARS = 900000;
 var QC_GAS_TOKEN_PREFIX = 'qctok@';
 var QC_GAS_TOKEN_EPOCH_KEY = 'QC_GAS_TOKEN_EPOCH';
 var QC_GAS_TOKEN_TTL_SEC = 21600; // ۶ ساعت؛ با هر درخواست تمدید می‌شود
-/* آیکون سربرگ مرورگر (favicon). اگر خواستید لوگوی دیگری بگذارید، این مقدار را
- * در Script Properties با کلید QC_GAS_FAVICON_URL تنظیم کنید. */
+/* آیکون سربرگ مرورگر (favicon). به‌صورت پیش‌فرض روی لوگوی رسمی سامانه تنظیم است؛
+ * برای لوگوی اختصاصی دیگر می‌توانید کلید QC_GAS_FAVICON_URL را در Script Properties قرار دهید. */
 var QC_GAS_FAVICON_KEY = 'QC_GAS_FAVICON_URL';
-var QC_GAS_FAVICON_FALLBACK = 'https://raw.githubusercontent.com/hagheofficial-cmyk/Sheettohtml/arena/865b3375-sheettohtml/crm-qc/public/favicon.png';
+var QC_GAS_FAVICON_FALLBACK = 'https://raw.githubusercontent.com/hagheofficial-cmyk/Qc-Restructure/2560d822c5cf01268aed0072ae0f6b0b86864ade/crm-qc/public/favicon.png';
 
 function onOpen() {
   try {
@@ -5521,10 +5564,10 @@ function crmqcOnSheetChange_() {
 function doGet(e) {
   var id = PropertiesService.getScriptProperties().getProperty(QC_GAS_ID_KEY);
   if (!id) {
-    return HtmlService.createHtmlOutput(
+    return withFavicon_(HtmlService.createHtmlOutput(
       '<meta charset="utf-8"><div dir="rtl" style="font:16px sans-serif;padding:32px">' +
       '<h2>سامانه هنوز راه‌اندازی نشده است</h2><p>در Apps Script تابع <code>setupStandaloneApp_</code> را از شیت مقصد اجرا و سپس Deploy کنید.</p></div>'
-    ).setTitle('راه‌اندازی سامانه QC');
+    ).setTitle('راه‌اندازی سامانه QC'));
   }
 
   // Placeholder replacement (not HtmlService templates) keeps the bundled
@@ -5569,7 +5612,7 @@ function faviconUrl_() {
     var custom = PropertiesService.getScriptProperties().getProperty(QC_GAS_FAVICON_KEY);
     if (custom) return custom;
   } catch (err) {}
-  return '';
+  return QC_GAS_FAVICON_FALLBACK;
 }
 
 function withFavicon_(output) {
@@ -5684,6 +5727,9 @@ function crmqcApi(method, requestUrl, body, token) {
         // Reads must not persist: a GET only re-derives in-memory defaults, and
         // writing from a cached snapshot could clobber a concurrent edit.
         var payload = jsonSafe_(result);
+        if (pathOnly === '/api/backup' && payload && typeof payload === 'object') {
+          try { payload.callReportStorage = readCallReportSettings_(); } catch (ignored) {}
+        }
         if (pathOnly === '/api/bootstrap' && payload && payload.counts) {
           var loaded = readInfo.loaded || [];
           var fullCounts = loaded.indexOf('tickets') >= 0 && loaded.indexOf('socials') >= 0 &&
@@ -5728,6 +5774,28 @@ function crmqcApi(method, requestUrl, body, token) {
        * writeDatabaseDiffFp_ سپرده شد. */
       if (window.__GAS_DB_DIRTY__) markSelfWrite_();
       var changedTabs = writeDatabaseDiffFp_(ss, beforeJson, live, false, readInfo.loaded);
+      /* در بازیابی بک‌اپ کامل، تنظیمات ذخیره‌شده‌ی گزارش تماس نیز بازیابی می‌شوند. */
+      if (pathOnly === '/api/backup' && method === 'POST') {
+        var bSrc = (body && body.backup) || body || {};
+        if (bSrc && bSrc.callReportStorage && typeof bSrc.callReportStorage === 'object') {
+          Object.keys(QC_GAS_CALL_REPORT_KEYS).forEach(function (crKey) {
+            if (bSrc.callReportStorage[crKey] == null) return;
+            var crText = typeof bSrc.callReportStorage[crKey] === 'string'
+              ? bSrc.callReportStorage[crKey] : JSON.stringify(bSrc.callReportStorage[crKey]);
+            try {
+              if (crText) JSON.parse(crText);
+              var crSheet = ss.getSheetByName(QC_GAS_CALL_REPORT_KEYS[crKey]);
+              if (crSheet) {
+                markSelfWrite_();
+                var crVals = crText ? [['json'], [crText]] : [['json']];
+                crSheet.clearContents();
+                crSheet.getRange(1, 1, crVals.length, 1).setValues(crVals);
+                styleHeader_(crSheet, 1);
+              }
+            } catch (ignored) {}
+          });
+        }
+      }
       /* فقط همان تب‌ها نسخهٔ تازه می‌گیرند؛ بقیهٔ کش گرم می‌ماند و bootstrap
        * بعدی (که کلاینت پس از هر ذخیره می‌زند) هیچ تبی را از شیت نمی‌خواند. */
       var responseRevision = currentRevision_();
