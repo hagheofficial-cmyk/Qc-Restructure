@@ -1253,6 +1253,112 @@ test('Redline reasons (all redline reason column variants) and QC comments are p
   assert.equal(errors.length, 0);
 });
 
+test('Batch team PDF download builds a valid UTF-8 ZIP of per-specialist PDFs and supports merged team PDF', async (t) => {
+  const data = fixture();
+  data.agents = [
+    { id: 1, ext: 3001, name: 'الهه عسگری', team: 'MLM', active: true },
+    { id: 2, ext: 3002, name: 'سمیرا شکیب', team: 'MLM', active: true },
+    { id: 3, ext: 3003, name: 'کارشناس بایگانی', team: 'MLM', active: false },
+    { id: 4, ext: 3004, name: 'حامد میرزایی', team: 'Tele Sales', active: true }
+  ];
+  const { w, dom, errors } = browser('public', data);
+  t.after(() => dom.window.close());
+
+  // Mock layout geometry (JSDOM has no layout engine), html2canvas, jsPDF, and blob download
+  Object.defineProperty(w.HTMLElement.prototype, 'scrollWidth', { configurable: true, get() { return 1240; } });
+  Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 1240; } });
+  Object.defineProperty(w.HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return 1800; } });
+  const savedFiles = [];
+  const addedPages = [];
+  w.html2canvas = async () => ({
+    width: 1240,
+    height: 1800,
+    toDataURL: () => 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+  });
+  class FakeJsPdf {
+    constructor(opts) { this.opts = opts; this.pages = [opts]; this.images = []; }
+    setFillColor() {}
+    rect() {}
+    addPage(fmt, orient) { this.pages.push({ format: fmt, orientation: orient }); addedPages.push(fmt); }
+    addImage(img) { this.images.push(img); }
+    output(kind) {
+      assert.equal(kind, 'arraybuffer');
+      const txt = '%PDF-1.4\n%pages:' + this.pages.length + '\n%%EOF';
+      return Buffer.from(txt, 'utf8').buffer.slice(0);
+    }
+    save(name) { savedFiles.push({ kind: 'pdf', name, pages: this.pages.length }); }
+  }
+  w.jspdf = { jsPDF: FakeJsPdf };
+  const origDownloadBlob = w.QCCapture.downloadBlob;
+  w.QCCapture.downloadBlob = (blob, name) => { savedFiles.push({ kind: 'blob', name, blob }); };
+
+  await w.App.boot();
+  await go(w, 'portfolio'); await settle(); await settle();
+
+  // Open batch PDF modal
+  const batchBtn = w.document.getElementById('pBatchPdf');
+  assert.ok(batchBtn, 'Batch PDF button must render on Portfolio page');
+  batchBtn.click(); await settle();
+
+  const teamSel = w.document.getElementById('bpTeam');
+  assert.ok(teamSel, 'Team selector must exist in batch PDF modal');
+  // Select MLM team (2 active + 1 archived)
+  const mlmOpt = [...teamSel.options].find(o => o.value === 'MLM');
+  assert.ok(mlmOpt, 'MLM team option must exist');
+  teamSel.value = 'MLM';
+  teamSel.dispatchEvent(new w.Event('change'));
+  assert.ok(w.document.getElementById('bpSummary').textContent.includes('۲ کارشناس'), 'Only 2 active MLM specialists selected by default');
+  assert.ok(w.document.getElementById('bpSummary').textContent.includes('الهه عسگری'));
+  assert.ok(w.document.getElementById('bpSummary').textContent.includes('سمیرا شکیب'));
+
+  // 1) Run ZIP mode (default)
+  w.document.getElementById('bpStart').click();
+  for (let i = 0; i < 40 && !savedFiles.length; i++) await new Promise(r => setTimeout(r, 20));
+  assert.equal(savedFiles.length, 1, 'One ZIP download must be triggered');
+  assert.equal(savedFiles[0].kind, 'blob');
+  assert.ok(savedFiles[0].name.endsWith('.zip'), 'Download filename ends with .zip');
+  const zipBuf = await new Promise((resolve, reject) => {
+    const fr = new w.FileReader();
+    fr.onload = () => resolve(Buffer.from(fr.result));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsArrayBuffer(savedFiles[0].blob);
+  });
+  // Verify PKZIP signatures and UTF-8 Persian PDF entries inside the archive
+  assert.equal(zipBuf.readUInt32LE(0), 0x04034b50, 'Valid ZIP local file header signature');
+  assert.equal(zipBuf.readUInt16LE(6), 0x0800, 'UTF-8 filename bit flag set');
+  const zipStr = zipBuf.toString('utf8');
+  assert.ok(zipStr.includes('الهه عسگری'), 'ZIP contains الهه عسگری PDF');
+  assert.ok(zipStr.includes('سمیرا شکیب'), 'ZIP contains سمیرا شکیب PDF');
+  assert.ok(zipStr.includes('%PDF-1.4'), 'ZIP entries contain real PDF payload');
+  assert.equal(zipStr.includes('حامد میرزایی'), false, 'Other teams must not be included');
+
+  // 2) Run Merged PDF mode
+  savedFiles.length = 0;
+  addedPages.length = 0;
+  batchBtn.click(); await settle();
+  const teamSel2 = w.document.getElementById('bpTeam');
+  teamSel2.value = 'MLM';
+  teamSel2.dispatchEvent(new w.Event('change'));
+  w.document.querySelector('input[name="bpMode"][value="merged"]').checked = true;
+  w.document.getElementById('bpStart').click();
+  for (let i = 0; i < 40 && !savedFiles.length; i++) await new Promise(r => setTimeout(r, 20));
+  assert.equal(savedFiles.length, 1, 'One merged PDF download must be triggered');
+  assert.equal(savedFiles[0].kind, 'pdf');
+  assert.ok(savedFiles[0].name.endsWith('.pdf'));
+  assert.equal(savedFiles[0].pages, 2, 'Merged PDF must contain 2 specialist pages for the 2 active MLM specialists');
+
+  // 3) Check GAS HtmlService sanitizer safety on rebuilt capture.js & pages/portfolio.js blocks
+  const idxHtml = fs.readFileSync(path.join(ROOT, 'apps-script-full/Index.html'), 'utf8');
+  for (const label of ['capture.js', 'pages/portfolio.js']) {
+    const m = idxHtml.match(new RegExp('<script>\\/\\* ' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\*\\/([\\s\\S]*?)<\\/script>'));
+    assert.ok(m, label + ' must be inlined in Index.html');
+    assert.equal(/<script|<\/script|<\\\/script/i.test(m[1]), false, label + ' must have zero raw script tags');
+    assert.equal(/\/[^/\n]*\\\/\//.test(m[1]), false, label + ' must have zero regex with //');
+  }
+  w.QCCapture.downloadBlob = origDownloadBlob;
+  assert.equal(errors.length, 0);
+});
+
 
 
 

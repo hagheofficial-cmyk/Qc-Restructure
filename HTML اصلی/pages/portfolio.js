@@ -11,6 +11,7 @@ async function render(root, arg) {
       <div class="ph-ic"><i class="fa-solid fa-id-card-clip"></i></div>
       <div><h2>پرونده کارشناس</h2><p>همه‌ی کارشناسان مدیریت کارشناسان — کلیک روی هر سطر برای نمره‌ها، معیارها و جزئیات هر تماس</p></div>
       <div class="spacer"></div>
+      <button class="btn primary" id="pBatchPdf" type="button"><i class="fa-solid fa-file-pdf"></i> دانلود تمام کارنامه‌ها (PDF)</button>
     </div>
 
     <div class="card" style="margin-bottom:16px">
@@ -257,17 +258,19 @@ async function render(root, arg) {
   function socialDetail(r){return `<div class="detail-row">QC: ${esc(r.qcAgent||'—')} · پیام‌رسان: ${esc(r.messenger||'—')} · وضعیت: ${esc(r.responseStatus||'—')}<br>
       دریافت: ${fa(r.receiveDate)} ${fa(r.receiveTime)} · پاسخ: ${fa(r.replyDate)} ${fa(r.replyTime)} · دقیقه کاری: ${fa(r.durationMin)}<br>
       SLA: ${triValue(r.qSla)} · پیگیری: ${triValue(r.qFollow)} · پایان‌بندی: ${triValue(r.qClosing)} · لحن: ${triValue(r.qTone)}<div style="white-space:pre-wrap">${esc(r.delayReason||'')} ${esc(r.reasonVerdict||'')} ${esc(r.comment||'')}</div></div>`;}
-  function callTable(rows) {
+  function callTable(rows, dataObj, isBatch) {
     if (!rows.length) return emptyState('fa-headset', 'بدون دیتای ریت تماس', 'بازه‌ی تاریخ را تغییر دهید یا از مرکز داده فایل QC وارد کنید.');
-    historyCalls = rows.slice().sort((a, b) => {
+    const sortedCalls = rows.slice().sort((a, b) => {
       const aj = C.parseDate(a.reviewDate), bj = C.parseDate(b.reviewDate);
       return aj && bj ? C.jalaliCmp(bj, aj) : (bj ? 1 : aj ? -1 : 0);
     });
+    if (!isBatch) historyCalls = sortedCalls;
+    const activeData = dataObj || curData;
     // Build a single matrix, preserving form/team and historical labels. Two
     // different versions of the same key must never be silently conflated.
     const columns = [], positions = new Map();
-    const matrix = historyCalls.map(row => {
-      const team = row.criteriaTeam || row.team || (curData && curData.agent.team) || '';
+    const matrix = sortedCalls.map(row => {
+      const team = row.criteriaTeam || row.team || (activeData && activeData.agent.team) || '';
       const definitions = QCParse.definitionsFor(row.formType, team);
       const snapshot = Array.isArray(row.criteriaSnapshot) ? row.criteriaSnapshot : [];
       const snapshotKeys = snapshot.filter(d => d.active !== false).map(d => d.key);
@@ -294,7 +297,7 @@ async function render(root, arg) {
       <colgroup>${weights.map(w => `<col style="width:${w * 100 / totalWeight}%">`).join('')}</colgroup>
       <thead>${columns.length ? `<tr><th class="profile-legend-head" colspan="${weights.length}"><div class="profile-criterion-legend">${columns.map((col, i) => `<span class="profile-legend-item"><b>${fa(i + 1)}</b> ${esc(col.label)}${multipleGroups ? ` <small>(${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</small>` : ''}</span>`).join('')}</div></th></tr>` : ''}
       <tr><th>تاریخ بررسی</th><th>لید و شماره تماس</th><th>فرم</th><th>نمره</th>${columns.map((col, i) => `<th class="profile-criterion-head" title="${esc(col.label)} — ${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''}"><span aria-hidden="true">${fa(i + 1)}</span><span class="profile-visually-hidden"> ${esc(col.label)} (${esc(col.form)}${col.team ? ' · ' + esc(QCParse.displayTeam(col.team)) : ''})</span></th>`).join('')}<th>ردلاین</th><th>زمان تماس</th><th>کامنت QC</th></tr></thead>
-      <tbody>${historyCalls.map((row, index) => `<tr id="pCallDetails-${index}" class="profile-call-row">
+      <tbody>${sortedCalls.map((row, index) => `<tr id="pCallDetails-${index}" class="profile-call-row">
           <td dir="ltr">${esc(fa(row.reviewDate || '—'))}</td>
           <td class="cell-main">${esc(row.leadName || '—')}<div class="cell-sub" dir="ltr">${esc(row.leadPhone || '—')}</div></td>
           <td>${esc(FORM_TYPE_FA[row.formType] || row.formType || '—')}</td>
@@ -307,14 +310,15 @@ async function render(root, arg) {
   }
 
   /* ---------- کارت نرخ موفقیت معیارهای تماس (پرتفوی) ---------- */
-  function criteriaCard(byTypeRates) {
+  function criteriaCard(byTypeRates, dataObj) {
     if (!Array.isArray(byTypeRates) || !byTypeRates.length) return '';
+    const activeData = dataObj || curData;
     const FORM__LABEL = { tele: 'Telesales', account: 'تیم اکانت', mlm: 'MLM/BNPL' };
     const ids = [];
     const cards = byTypeRates.map((bt, bi) => {
       if (!bt.rates || !bt.rates.length) return '';
       const rows = bt.rates.map((r, ri) => {
-        const lbl = r.label || window.QCParse.labelOf(bt.form,r.key,curData && curData.agent.team);
+        const lbl = r.label || window.QCParse.labelOf(bt.form, r.key, activeData && activeData.agent.team);
         const cid = 'cr-' + bi + '-' + ri;
         ids.push(cid);
         const st = r.successRate === '' ? null : r.successRate;
@@ -539,7 +543,8 @@ async function render(root, arg) {
         </tr>`).join('')}</tbody></table></div></div>`;
   }
 
-  function renderProfile(body, d, periodLabel) {
+  function renderProfile(body, d, periodLabel, opts) {
+    const isBatch = !!(opts && opts.batch);
     const a = d.agent;
     const monthLine = periodLabel && periodLabel !== 'همه دوره‌ها' ? `<span class="tag-team" style="background:var(--violet-soft);color:var(--violet)"><i class="fa-regular fa-calendar"></i> ${esc(periodLabel)}</span>` : '<span class="tag-team">همه دوره‌ها</span>';
     const T = d.tickets, S = d.socials, Ph = d.calls, Sit = d.situational || { hasData: false };
@@ -638,7 +643,7 @@ async function render(root, arg) {
       ${weightedCard(d)}
       ${scorecard(d)}
 
-      ${criteriaCard(Ph.byTypeRates)}
+      ${criteriaCard(Ph.byTypeRates, d)}
       ${situationalCard(Sit)}
       ${redlineCard(Ph.redlineRows)}
 
@@ -664,7 +669,7 @@ async function render(root, arg) {
           <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-headset"></i></div>
             <div><h3>سوابق ریت تماس (${fa(Ph.count)})</h3><div class="sub">همهٔ تماس‌ها در یک جدول؛ شمارهٔ هر ستون با نام المان بالای جدول مطابقت دارد. نقطه یعنی آن المان برای این ریت نیست.</div></div></div>
           <div class="card-pad history-types">${typeRows}</div>
-          <div class="table-wrap history-wrap profile-call-wrap">${callTable(Ph.rows)}</div>
+          <div class="table-wrap history-wrap profile-call-wrap">${callTable(Ph.rows, d, isBatch)}</div>
         </div>
       </div>
 
@@ -675,7 +680,7 @@ async function render(root, arg) {
           <div class="sub">${d.voiceCount ? `فایل‌های ویس: ${fa(d.voiceCount)} · ` : ''}فقط اقدامات ثبت‌شده در همین سامانه قابل تغییر وضعیت‌اند</div>
           </div>
           <div class="spacer"></div>
-          <button class="btn success-soft" id="pAddAction"><i class="fa-solid fa-plus"></i> ثبت اقدام جدید</button>
+          ${isBatch ? '' : '<button class="btn success-soft" id="pAddAction"><i class="fa-solid fa-plus"></i> ثبت اقدام جدید</button>'}
         </div>
         <div id="pActionsWrap" class="card-pad" style="display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto">
           ${d.actions.length ? d.actions.map(x => `
@@ -690,59 +695,62 @@ async function render(root, arg) {
       </div>` : ''}`;
 
     body.insertAdjacentHTML('beforeend', `<div class="profile-image-note">گزارش عملکرد ${esc(a.name)} · ${esc(periodLabel)}<br>مبنا: تاریخ بررسی هر ریت. نمره‌ی خالی صفر نیست؛ میانگین بر نمره‌های معتبر وزن‌دار است. 1 = رعایت، 0 = عدم رعایت، - = موضوعیت نداشته و خارج از مخرج نرخ؛ — = ثبت‌نشده. اقدام‌ها جدا از بازه‌ی ارزیابی‌اند.</div>`);
-    const fitBtn = $('#pFitAgentRange', body);
-    if (fitBtn && (allRange.from || allRange.to)) {
-      fitBtn.addEventListener('click', () => App.setDateRange({ from: allRange.from || '', to: allRange.to || '' }));
-    }
-    bindCallRedlines($('#pCallHistory', body) || body, historyCalls);
-    if (d.actions.length || true) {
-      const wrap = $('#pActionsWrap');
-      $('#pAddAction').addEventListener('click', () => {
-        const title = prompt('عنوان اقدام اصلاحی را وارد کنید:');
-        if (!title || !title.trim()) return;
-        api.post('/api/actions', { agent: curAgent, title: title.trim() })
-          .then((it) => {
-            if (!wrap.querySelector('.action-row')) wrap.innerHTML = '';
-            const div = document.createElement('div');
-            div.className = 'action-row';
-            div.style.cssText = 'display:flex;gap:10px;align-items:center;padding:9px;background:var(--panel-soft);border-radius:9px';
-            div.dataset.id = it.id;
-            div.dataset.src = 'system';
-            div.innerHTML = `<span class="badge warn pStatus" style="cursor:pointer">انجام نشده</span>
-              <span style="flex:1">${esc(it.title)}</span>
-              <button class="btn ghost pDel" style="padding:4px 8px"><i class="fa-solid fa-trash"></i></button>
-              <span style="color:var(--muted);font-size:11px">${esc(it.date)}</span>`;
-            wrap.prepend(div);
-            attachRowHandlers(div);
-            toast.success('اقدام ثبت شد');
-          })
-          .catch((e) => toast.error(e.message));
-      });
-
-      function attachRowHandlers(row) {
-        const id = +row.dataset.id, src = row.dataset.src;
-        const badge = row.querySelector('.pStatus');
-        const del = row.querySelector('.pDel');
-        if (src !== 'system') return;
-        if (badge) badge.addEventListener('click', () => {
-          const next = badge.classList.contains('ok') ? 'انجام نشده' : 'انجام شده';
-          api.put('/api/actions/' + id, { status: next })
+    if (!isBatch) {
+      const fitBtn = $('#pFitAgentRange', body);
+      if (fitBtn && (allRange.from || allRange.to)) {
+        fitBtn.addEventListener('click', () => App.setDateRange({ from: allRange.from || '', to: allRange.to || '' }));
+      }
+      bindCallRedlines($('#pCallHistory', body) || body, historyCalls);
+      if (d.actions.length || true) {
+        const wrap = $('#pActionsWrap', body);
+        const addBtn = $('#pAddAction', body);
+        if (addBtn) addBtn.addEventListener('click', () => {
+          const title = prompt('عنوان اقدام اصلاحی را وارد کنید:');
+          if (!title || !title.trim()) return;
+          api.post('/api/actions', { agent: curAgent, title: title.trim() })
             .then((it) => {
-              badge.className = 'badge ' + (it.status === 'انجام شده' ? 'ok' : 'warn') + ' pStatus';
-              badge.textContent = it.status;
-              toast.success('وضعیت به "' + next + '" تغییر یافت');
+              if (!wrap.querySelector('.action-row')) wrap.innerHTML = '';
+              const div = document.createElement('div');
+              div.className = 'action-row';
+              div.style.cssText = 'display:flex;gap:10px;align-items:center;padding:9px;background:var(--panel-soft);border-radius:9px';
+              div.dataset.id = it.id;
+              div.dataset.src = 'system';
+              div.innerHTML = `<span class="badge warn pStatus" style="cursor:pointer">انجام نشده</span>
+                <span style="flex:1">${esc(it.title)}</span>
+                <button class="btn ghost pDel" style="padding:4px 8px"><i class="fa-solid fa-trash"></i></button>
+                <span style="color:var(--muted);font-size:11px">${esc(it.date)}</span>`;
+              wrap.prepend(div);
+              attachRowHandlers(div);
+              toast.success('اقدام ثبت شد');
             })
             .catch((e) => toast.error(e.message));
         });
-        if (del) del.addEventListener('click', () => {
-          if (!confirm('این اقدام برای همیشه حذف شود؟')) return;
-          api.del('/api/actions/' + id)
-            .then(() => { row.remove(); toast.success('حذف شد'); })
-            .catch((e) => toast.error(e.message));
-        });
-      }
 
-      $$('.action-row', wrap).forEach(attachRowHandlers);
+        function attachRowHandlers(row) {
+          const id = +row.dataset.id, src = row.dataset.src;
+          const badge = row.querySelector('.pStatus');
+          const del = row.querySelector('.pDel');
+          if (src !== 'system') return;
+          if (badge) badge.addEventListener('click', () => {
+            const next = badge.classList.contains('ok') ? 'انجام نشده' : 'انجام شده';
+            api.put('/api/actions/' + id, { status: next })
+              .then((it) => {
+                badge.className = 'badge ' + (it.status === 'انجام شده' ? 'ok' : 'warn') + ' pStatus';
+                badge.textContent = it.status;
+                toast.success('وضعیت به "' + next + '" تغییر یافت');
+              })
+              .catch((e) => toast.error(e.message));
+          });
+          if (del) del.addEventListener('click', () => {
+            if (!confirm('این اقدام برای همیشه حذف شود؟')) return;
+            api.del('/api/actions/' + id)
+              .then(() => { row.remove(); toast.success('حذف شد'); })
+              .catch((e) => toast.error(e.message));
+          });
+        }
+
+        $$('.action-row', wrap).forEach(attachRowHandlers);
+      }
     }
 
     if (allKeys.length) {
@@ -750,7 +758,8 @@ async function render(root, arg) {
         label: '', borderColor: color, backgroundColor: color + '33', tension: .35, pointRadius: 3,
         data: allKeys.map(k => { const m = mIdx(arr, k); return m && m.avgScore !== '' ? m.avgScore : null; })
       });
-      App.chart($('#pmChart'), {
+      const chartCanvas = $('#pmChart', body);
+      const chartCfg = {
         type: 'line',
         data: {
           labels,
@@ -761,7 +770,21 @@ async function render(root, arg) {
           ]
         },
         options: { responsive: true, maintainAspectRatio: false, spanGaps: true, plugins: { legend: { position: 'bottom' } }, scales: { y: { min: 0, max: 100 } } }
-      });
+      };
+      if (isBatch) {
+        if (chartCanvas && typeof Chart === 'function') {
+          try {
+            Chart.defaults.font.family = 'Vazirmatn';
+            Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+            chartCfg.options.animation = false;
+            if (App.styleChart) App.styleChart(chartCfg.options);
+            const ch = new Chart(chartCanvas, chartCfg);
+            if (opts && Array.isArray(opts.charts)) opts.charts.push(ch);
+          } catch (e) {}
+        }
+      } else {
+        App.chart(chartCanvas, chartCfg);
+      }
     }
   }
 
@@ -825,6 +848,268 @@ async function render(root, arg) {
       if (button && button.isConnected) { button.disabled = !curData; button.innerHTML = label; }
     }
   }
+
+  /* ------------------------------ دانلود گروهی کارنامه‌های PDF به تفکیک تیم ------------------------------ */
+  async function openBatchPdfModal() {
+    if (!window.QCCapture || typeof QCCapture.toPdfBytes !== 'function' || typeof QCCapture.buildZip !== 'function') {
+      toast.error('بخش capture.js به‌روزرسانی نشده است؛ ابتدا کد capture.js را جای‌گذاری کنید');
+      return;
+    }
+    let allRows = [];
+    try {
+      const res = await api.get('/api/portfolio/agents');
+      allRows = Array.isArray(res && res.rows) ? res.rows.slice() : [];
+    } catch (e) {
+      allRows = (lastCombined || []).slice();
+    }
+    const allTeams = [...new Set(
+      teams.concat(allRows.map((r) => r.team).filter(Boolean))
+    )].sort();
+    const currentSelected = msTeams.getValues();
+    const defaultTeam = currentSelected.length === 1 ? currentSelected[0] : '__ALL__';
+
+    let running = false;
+    let cancelled = false;
+
+    const teamOptionsHtml = [
+      '<option value="__ALL__">همه تیم‌ها</option>'
+    ].concat(allTeams.map((t) => {
+      const cnt = allRows.filter((r) => QCParse.teamKey(r.team) === QCParse.teamKey(t)).length;
+      const sel = defaultTeam === t ? ' selected' : '';
+      return '<option value="' + esc(t) + '"' + sel + '>' + esc(QCParse.displayTeam(t)) + ' (' + fa(cnt) + ' کارشناس)</option>';
+    })).join('');
+
+    const periodText = App.dateRangeLabel ? App.dateRangeLabel() : ((App.dateRange.from || App.dateRange.to)
+      ? ('از ' + fa(App.dateRange.from || 'ابتدا') + ' تا ' + fa(App.dateRange.to || 'انتها'))
+      : 'همه تاریخ‌ها');
+
+    const dlg = UI.modal([
+      UI.modalHead('دانلود تمام کارنامه‌ها (PDF)', 'fa-file-pdf'),
+      '<div class="modal-body" style="display:flex;flex-direction:column;gap:14px">',
+      '  <div class="alert info" style="margin:0;display:flex;align-items:center;gap:8px">',
+      '    <i class="fa-regular fa-calendar"></i>',
+      '    <span>بازه‌ی کارنامه‌ها: <b>' + esc(periodText) + '</b> (مطابق فیلتر تاریخ بالای صفحه)</span>',
+      '  </div>',
+      '  <div class="field">',
+      '    <label for="bpTeam">انتخاب تیم</label>',
+      '    <select class="input" id="bpTeam">' + teamOptionsHtml + '</select>',
+      '  </div>',
+      '  <div style="display:flex;flex-wrap:wrap;gap:14px">',
+      '    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="checkbox" id="bpActiveOnly" checked> فقط کارشناسان فعال (بدون بایگانی)</label>',
+      '    <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px"><input type="checkbox" id="bpRatedOnly"> فقط کارشناسان دارای ارزیابی در این بازه</label>',
+      '  </div>',
+      '  <div class="field">',
+      '    <label>فرمت خروجی</label>',
+      '    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">',
+      '      <label style="display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-soft);cursor:pointer">',
+      '        <input type="radio" name="bpMode" value="zip" checked style="margin-top:3px">',
+      '        <span><b>فایل ZIP (PDF مجزای هر کارشناس)</b><small style="display:block;color:var(--muted);margin-top:2px">هر کارشناس فایل PDF مستقل با نام خودش داخل یک فایل زیپ</small></span>',
+      '      </label>',
+      '      <label style="display:flex;gap:8px;align-items:flex-start;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:var(--panel-soft);cursor:pointer">',
+      '        <input type="radio" name="bpMode" value="merged" style="margin-top:3px">',
+      '        <span><b>یک فایل PDF یکپارچه (کل تیم)</b><small style="display:block;color:var(--muted);margin-top:2px">کارنامه‌ی همه کارشناسان تیم پشت‌سرهم در یک فایل PDF</small></span>',
+      '      </label>',
+      '    </div>',
+      '  </div>',
+      '  <div id="bpSummary" style="padding:10px 12px;border-radius:10px;background:var(--panel-soft);font-size:12.5px;line-height:1.8"></div>',
+      '  <div id="bpProgressWrap" style="display:none;flex-direction:column;gap:8px">',
+      '    <div style="display:flex;justify-content:space-between;font-size:12.5px"><span id="bpProgressText">در حال آماده‌سازی…</span><b id="bpProgressCount">۰٪</b></div>',
+      '    <div style="height:10px;background:var(--soft);border-radius:999px;overflow:hidden"><div id="bpProgressFill" style="height:100%;width:0%;background:linear-gradient(90deg,var(--brand),var(--good));transition:width .2s ease"></div></div>',
+      '  </div>',
+      '</div>',
+      '<div class="modal-foot">',
+      '  <button type="button" class="btn ghost" id="bpClose">بستن</button>',
+      '  <button type="button" class="btn primary" id="bpStart"><i class="fa-solid fa-download"></i> شروع دانلود کارنامه‌ها</button>',
+      '</div>'
+    ].join('\n'), {
+      onClose() { cancelled = true; }
+    });
+
+    const teamSel = $('#bpTeam', dlg);
+    const activeChk = $('#bpActiveOnly', dlg);
+    const ratedChk = $('#bpRatedOnly', dlg);
+    const summaryEl = $('#bpSummary', dlg);
+    const progWrap = $('#bpProgressWrap', dlg);
+    const progText = $('#bpProgressText', dlg);
+    const progCount = $('#bpProgressCount', dlg);
+    const progFill = $('#bpProgressFill', dlg);
+    const startBtn = $('#bpStart', dlg);
+    const closeBtn = $('#bpClose', dlg);
+
+    function getTargetRows() {
+      const sel = teamSel.value;
+      const activeOnly = activeChk.checked;
+      const ratedOnly = ratedChk.checked;
+      return allRows.filter((r) => {
+        if (sel !== '__ALL__' && QCParse.teamKey(r.team) !== QCParse.teamKey(sel)) return false;
+        if (activeOnly && r.active === false) return false;
+        if (ratedOnly && !(Number(r.totalCount || 0) > 0 || (r.situationalAvg !== '' && r.situationalAvg != null) || r.ticketAvg !== '' || r.socialAvg !== '')) return false;
+        return !!r.name;
+      }).sort((a, b) => String(a.name).localeCompare(String(b.name), 'fa'));
+    }
+
+    function updateSummary() {
+      const list = getTargetRows();
+      const teamName = teamSel.value === '__ALL__' ? 'همه تیم‌ها' : QCParse.displayTeam(teamSel.value);
+      if (!list.length) {
+        summaryEl.innerHTML = '<span style="color:var(--bad)">هیچ کارشناسی با این فیلتر یافت نشد.</span>';
+        startBtn.disabled = true;
+        return;
+      }
+      const preview = list.slice(0, 8).map((r) => esc(r.name)).join('، ') + (list.length > 8 ? ' و ' + fa(list.length - 8) + ' نفر دیگر' : '');
+      summaryEl.innerHTML = '<div><b>' + fa(list.length) + ' کارشناس</b> از <b>' + esc(teamName) + '</b> برای ساخت کارنامه PDF انتخاب شده‌اند:</div>' +
+        '<div style="color:var(--muted);font-size:11.5px;margin-top:4px">' + preview + '</div>';
+      startBtn.disabled = running;
+    }
+
+    teamSel.addEventListener('change', updateSummary);
+    activeChk.addEventListener('change', updateSummary);
+    ratedChk.addEventListener('change', updateSummary);
+    updateSummary();
+
+    closeBtn.addEventListener('click', () => {
+      if (running) {
+        cancelled = true;
+        progText.textContent = 'در حال توقف عملیات…';
+        closeBtn.disabled = true;
+      } else {
+        dlg.close();
+      }
+    });
+
+    const nextFrame = () => new Promise((resolve) => {
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(resolve));
+      else setTimeout(resolve, 16);
+    });
+
+    startBtn.addEventListener('click', async () => {
+      const targets = getTargetRows();
+      if (!targets.length || running) return;
+      const modeEl = dlg.querySelector('input[name="bpMode"]:checked');
+      const mode = modeEl ? modeEl.value : 'zip';
+      const teamLabel = teamSel.value === '__ALL__' ? 'همه تیم‌ها' : QCParse.displayTeam(teamSel.value);
+      const periodSlug = (App.dateRange.from || App.dateRange.to)
+        ? ((App.dateRange.from || 'ابتدا') + ' تا ' + (App.dateRange.to || 'انتها'))
+        : 'همه تاریخ‌ها';
+
+      running = true;
+      cancelled = false;
+      teamSel.disabled = true;
+      activeChk.disabled = true;
+      ratedChk.disabled = true;
+      $$('input[name="bpMode"]', dlg).forEach((el) => { el.disabled = true; });
+      startBtn.disabled = true;
+      closeBtn.textContent = 'توقف';
+      progWrap.style.display = 'flex';
+      progFill.style.width = '2%';
+
+      const stageWrap = document.createElement('div');
+      stageWrap.style.cssText = 'position:fixed;left:-100000px;top:0;width:1240px;pointer-events:none;z-index:-1;';
+      const stage = document.createElement('div');
+      stage.className = 'profile-content';
+      stageWrap.appendChild(stage);
+      document.body.appendChild(stageWrap);
+
+      const entries = [];
+      let mergedPdf = null;
+      const failed = [];
+      const fetchPortfolio = (name) => api.get('/api/portfolio?ident=' + encodeURIComponent(name));
+      let nextPromise = fetchPortfolio(targets[0].name);
+
+      try {
+        for (let i = 0; i < targets.length; i++) {
+          if (cancelled) break;
+          const row = targets[i];
+          const pct = Math.round((i / targets.length) * 100);
+          progText.textContent = 'در حال ساخت کارنامه ' + fa(i + 1) + ' از ' + fa(targets.length) + ' — ' + row.name + '…';
+          progCount.textContent = fa(pct) + '٪';
+          progFill.style.width = Math.max(3, pct) + '%';
+
+          const curPromise = nextPromise;
+          nextPromise = (i + 1 < targets.length) ? fetchPortfolio(targets[i + 1].name) : null;
+
+          const batchCharts = [];
+          try {
+            const data = await curPromise;
+            if (cancelled) break;
+            const scope = data.scope || { from: App.dateRange.from, to: App.dateRange.to };
+            data.scope = scope;
+            const periodOr = (scope.from || scope.to)
+              ? ('از ' + fa(scope.from || 'ابتدا') + ' تا ' + fa(scope.to || 'انتها'))
+              : 'همه تاریخ‌ها';
+            stage.innerHTML = '';
+            renderProfile(stage, data, periodOr, { batch: true, charts: batchCharts });
+            await nextFrame();
+            batchCharts.forEach((ch) => { try { if (ch && ch.update) ch.update('none'); } catch (e) {} });
+            await nextFrame();
+            if (cancelled) break;
+
+            if (mode === 'merged') {
+              const out = await QCCapture.appendPdf(mergedPdf, stage, revealAll);
+              mergedPdf = out.pdf;
+            } else {
+              const out = await QCCapture.toPdfBytes(stage, revealAll);
+              const pdfFile = QCCapture.fileName(data.agent.name + ' — کارنامه ' + periodSlug, 'pdf');
+              entries.push({ name: pdfFile, bytes: out.bytes });
+            }
+          } catch (err) {
+            failed.push(row.name + (err && err.message ? ' (' + err.message + ')' : ''));
+          } finally {
+            batchCharts.forEach((ch) => { try { if (ch && ch.destroy) ch.destroy(); } catch (e) {} });
+            stage.innerHTML = '';
+          }
+        }
+
+        if (cancelled) {
+          toast.info('دانلود گروهی کارنامه‌ها متوقف شد');
+          return;
+        }
+
+        progFill.style.width = '100%';
+        progCount.textContent = '۱۰۰٪';
+        progText.textContent = 'در حال آماده‌سازی فایل نهایی برای دانلود…';
+
+        const okCount = mode === 'merged' ? (targets.length - failed.length) : entries.length;
+        if (!okCount) {
+          toast.error('هیچ کارنامه‌ای ساخته نشد' + (failed.length ? ': ' + failed[0] : ''));
+          return;
+        }
+
+        if (mode === 'merged' && mergedPdf) {
+          QCCapture.savePdfDoc(mergedPdf, 'کارنامه‌ها — ' + teamLabel + ' — ' + periodSlug);
+        } else {
+          const zipBlob = QCCapture.buildZip(entries);
+          const zipName = QCCapture.fileName('کارنامه‌ها — ' + teamLabel + ' — ' + periodSlug, 'zip');
+          QCCapture.downloadBlob(zipBlob, zipName);
+        }
+
+        if (failed.length) {
+          toast.info('کارنامه ' + fa(okCount) + ' کارشناس دانلود شد (' + fa(failed.length) + ' خطا: ' + failed.slice(0, 3).join('، ') + ')', 7000);
+        } else {
+          toast.success(mode === 'merged'
+            ? ('فایل PDF یکپارچه شامل ' + fa(okCount) + ' کارنامه از ' + teamLabel + ' دانلود شد')
+            : ('فایل ZIP شامل ' + fa(okCount) + ' کارنامه PDF مجزا از ' + teamLabel + ' دانلود شد'));
+        }
+        dlg.close();
+      } finally {
+        if (nextPromise) nextPromise.catch(() => {});
+        stageWrap.remove();
+        running = false;
+        if (dlg.isConnected) {
+          teamSel.disabled = false;
+          activeChk.disabled = false;
+          ratedChk.disabled = false;
+          $$('input[name="bpMode"]', dlg).forEach((el) => { el.disabled = false; });
+          startBtn.disabled = false;
+          closeBtn.disabled = false;
+          closeBtn.textContent = 'بستن';
+        }
+      }
+    });
+  }
+
+  const batchBtn = $('#pBatchPdf', root);
+  if (batchBtn) batchBtn.addEventListener('click', openBatchPdfModal);
 
   App.onDateRangeChange(refresh);
   await renderMaster();

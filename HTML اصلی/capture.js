@@ -30,10 +30,10 @@ function freezeCanvases(source, copy) {
     const rect = canvas.getBoundingClientRect();
     const image = document.createElement('img');
     image.src = url;
-    // Reserve the chart's aspect ratio before its data URL has loaded.
+    /* Reserve the chart's aspect ratio before its data URL has loaded. */
     if (rect.width && rect.height) { image.width = Math.round(rect.width); image.height = Math.round(rect.height); }
     image.style.cssText = 'display:block;max-width:100%;height:auto;' +
-      (rect.width ? `width:${Math.round(rect.width)}px;` : 'width:100%;');
+      (rect.width ? 'width:' + Math.round(rect.width) + 'px;' : 'width:100%;');
     target.replaceWith(image);
   });
 }
@@ -80,20 +80,25 @@ async function toCanvas(source, prepare) {
 }
 
 function fileName(name, extension) {
-  return String(name || 'کارنامه').replace(/[\\/:*?"<>|]/g, '-') + '.' + extension;
+  const safe = String(name || 'کارنامه').replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, ' ').trim();
+  return (safe || 'کارنامه') + (extension ? '.' + extension : '');
+}
+
+function downloadBlob(blob, fullName) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fullName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2500);
 }
 
 async function download(source, filename, prepare) {
   const canvas = await toCanvas(source, prepare);
   const blob = await new Promise((resolve, reject) => canvas.toBlob((b) => b ? resolve(b) : reject(new Error('ساخت فایل عکس ممکن نشد')), 'image/png'));
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName(filename, 'png');
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1500);
+  downloadBlob(blob, fileName(filename, 'png'));
   return { width: canvas.width, height: canvas.height };
 }
 
@@ -115,13 +120,10 @@ function tileEnd(offset, proposed, pageSize, blocks) {
   return end;
 }
 
-/* PDF یکپارچه و بدون صفحه‌بندی (تک‌صفحه پیوسته):
- * کل کارنامه روی یک صفحه‌ی پیوسته با ارتفاع دقیق محتوا قرار می‌گیرد تا هیچ
- * جدولی وسط صفحه دو نیم نشود. برای پایداری حافظه‌ی مرورگر در کارنامه‌های بلند،
- * رندر DOM در نوارهای محدود (حداکثر ۶۰۰۰ پیکسل) انجام و بدون درز روی همان
- * صفحه‌ی پیوسته چیده می‌شود. فقط در موارد بسیار استثنایی فراتر از سقف استاندارد
- * PDF (۱۴۰۰۰ پوینت ≈ ۲۶۰۰۰ پیکسل)، برش در مرز ردیف/کارت انجام می‌شود. */
-async function downloadPdf(source, filename, prepare) {
+/* هسته‌ی مشترک ساخت یا الحاق صفحه به PDF یکپارچه و بدون صفحه‌بندی (تک‌صفحه پیوسته):
+ * اگر existingPdf پاس داده شود، کارنامه جدید به‌عنوان صفحه‌ی مستقل بعدی به همان
+ * PDF اضافه می‌شود (برای خروجی تجمیعی کل تیم)؛ وگرنه یک سند PDF جدید ساخته می‌شود. */
+async function captureToPdf(existingPdf, source, prepare) {
   if (!source || !source.isConnected) throw new Error('پرونده‌ی آماده‌ای برای خروجی وجود ندارد');
   if (typeof window.html2canvas !== 'function') throw new Error('کتابخانه‌ی عکس بارگذاری نشده است');
   const lib = window.jspdf && (window.jspdf.jsPDF || window.jspdf);
@@ -129,18 +131,18 @@ async function downloadPdf(source, filename, prepare) {
   const { host } = buildHost(source, prepare);
   try {
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
-    // Include any remaining overflow in the capture, rather than cutting it off.
+    /* Include any remaining overflow in the capture, rather than cutting it off. */
     const width = Math.ceil(Math.max(host.clientWidth, host.scrollWidth, parseFloat(host.style.width) || 0));
     host.style.width = width + 'px';
     const height = Math.ceil(Math.max(host.scrollHeight, host.getBoundingClientRect().height));
     if (!width || !height) throw new Error('ابعاد محتوای PDF قابل محاسبه نیست');
 
     const bg = themeBackground();
-    const pageWidth = 842; // عرض استاندارد A4 افقی برای خوانایی کامل جدول‌ها
+    const pageWidth = 842; /* عرض استاندارد A4 افقی برای خوانایی کامل جدول‌ها */
     const margin = 18;
     const imageWidth = pageWidth - margin * 2;
     const ptPerPx = imageWidth / width;
-    const MAX_PDF_PAGE_PT = 14000; // سقف استاندارد PDF 1.7 (حداکثر ۱۴۴۰۰ پوینت)
+    const MAX_PDF_PAGE_PT = 14000; /* سقف استاندارد PDF 1.7 (حداکثر ۱۴۴۰۰ پوینت) */
     const maxSlicePx = Math.max(1, Math.floor((MAX_PDF_PAGE_PT - margin * 2) / ptPerPx));
 
     const pages = [];
@@ -166,10 +168,16 @@ async function downloadPdf(source, filename, prepare) {
     };
 
     const firstH = pageHeightOf(pages[0].height);
-    const pdf = new lib({ unit: 'pt', format: [pageWidth, firstH], orientation: orientFor(pageWidth, firstH), compress: true });
-    paintBg(pdf, pageWidth, firstH);
+    let pdf = existingPdf;
+    if (!pdf) {
+      pdf = new lib({ unit: 'pt', format: [pageWidth, firstH], orientation: orientFor(pageWidth, firstH), compress: true });
+      paintBg(pdf, pageWidth, firstH);
+    } else {
+      pdf.addPage([pageWidth, firstH], orientFor(pageWidth, firstH));
+      paintBg(pdf, pageWidth, firstH);
+    }
 
-    // نوارهای رندر محدود تا سقف canvas مرورگر هیچ‌گاه سرریز نشود.
+    /* نوارهای رندر محدود تا سقف canvas مرورگر هیچ‌گاه سرریز نشود. */
     const stripLimit = 6000;
     for (let pIndex = 0; pIndex < pages.length; pIndex++) {
       const page = pages[pIndex];
@@ -201,10 +209,147 @@ async function downloadPdf(source, filename, prepare) {
         stripOffset += stripH;
       }
     }
-    pdf.save(fileName(filename, 'pdf'));
-    return { pages: pages.length, width, height };
+    return { pdf, pages: pages.length, width, height };
   } finally { host.remove(); }
 }
 
-window.QCCapture = { download, downloadPdf, toCanvas };
+async function downloadPdf(source, filename, prepare) {
+  const out = await captureToPdf(null, source, prepare);
+  out.pdf.save(fileName(filename, 'pdf'));
+  return { pages: out.pages, width: out.width, height: out.height };
+}
+
+async function toPdfBytes(source, prepare) {
+  const out = await captureToPdf(null, source, prepare);
+  const raw = out.pdf.output('arraybuffer');
+  return { bytes: new Uint8Array(raw), pages: out.pages, width: out.width, height: out.height };
+}
+
+async function appendPdf(existingPdf, source, prepare) {
+  return await captureToPdf(existingPdf, source, prepare);
+}
+
+function savePdfDoc(pdf, filename) {
+  pdf.save(fileName(filename, 'pdf'));
+}
+
+/* ---------------------------------------------------------------------------
+ * سازنده‌ی سبک و استاندارد فایل ZIP (بدون وابستگی خارجی، با پشتیبانی UTF-8
+ * برای نام فارسی کارشناسان و CRC-32 استاندارد). چون PDFهای ساخته‌شده با jsPDF
+ * از قبل فشرده هستند، روش STORE (بدون فشرده‌سازی مجدد) سریع و بدون افت کیفیت است.
+ * ------------------------------------------------------------------------- */
+let CRC_TABLE = null;
+function crc32(bytes) {
+  if (!CRC_TABLE) {
+    CRC_TABLE = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+      CRC_TABLE[i] = c >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) crc = CRC_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function encodeUtf8(str) {
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+  const bin = unescape(encodeURIComponent(str));
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+
+function dosDateTime(date) {
+  const d = date instanceof Date ? date : new Date();
+  const yr = Math.max(1980, d.getFullYear()) - 1980;
+  const dosDate = ((yr & 0x7f) << 9) | (((d.getMonth() + 1) & 0x0f) << 5) | (d.getDate() & 0x1f);
+  const dosTime = ((d.getHours() & 0x1f) << 11) | ((d.getMinutes() & 0x3f) << 5) | ((d.getSeconds() >> 1) & 0x1f);
+  return { dosDate, dosTime };
+}
+
+function buildZip(entries) {
+  const now = dosDateTime(new Date());
+  const used = new Set();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const data = entry.bytes instanceof Uint8Array ? entry.bytes : new Uint8Array(entry.bytes);
+    let cleanName = String(entry.name || ('report-' + (i + 1) + '.pdf')).replace(/[\\:*?"<>|]/g, '-');
+    if (used.has(cleanName.toLowerCase())) {
+      const dot = cleanName.lastIndexOf('.');
+      const stem = dot > 0 ? cleanName.slice(0, dot) : cleanName;
+      const ext = dot > 0 ? cleanName.slice(dot) : '';
+      let n = 2;
+      while (used.has((stem + ' (' + n + ')' + ext).toLowerCase())) n++;
+      cleanName = stem + ' (' + n + ')' + ext;
+    }
+    used.add(cleanName.toLowerCase());
+
+    const nameBytes = encodeUtf8(cleanName);
+    const crc = crc32(data);
+    const size = data.length;
+
+    const lfh = new Uint8Array(30 + nameBytes.length);
+    const lv = new DataView(lfh.buffer);
+    lv.setUint32(0, 0x04034b50, true);
+    lv.setUint16(4, 20, true);
+    lv.setUint16(6, 0x0800, true); /* UTF-8 filename flag */
+    lv.setUint16(8, 0, true);      /* STORE */
+    lv.setUint16(10, now.dosTime, true);
+    lv.setUint16(12, now.dosDate, true);
+    lv.setUint32(14, crc, true);
+    lv.setUint32(18, size, true);
+    lv.setUint32(22, size, true);
+    lv.setUint16(26, nameBytes.length, true);
+    lv.setUint16(28, 0, true);
+    lfh.set(nameBytes, 30);
+    localParts.push(lfh, data);
+
+    const cdh = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(cdh.buffer);
+    cv.setUint32(0, 0x02014b50, true);
+    cv.setUint16(4, 0x0314, true); /* Unix + v2.0 for cross-OS UTF-8 support */
+    cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); /* UTF-8 filename flag */
+    cv.setUint16(10, 0, true);     /* STORE */
+    cv.setUint16(12, now.dosTime, true);
+    cv.setUint16(14, now.dosDate, true);
+    cv.setUint32(16, crc, true);
+    cv.setUint32(20, size, true);
+    cv.setUint32(24, size, true);
+    cv.setUint16(28, nameBytes.length, true);
+    cv.setUint16(30, 0, true);
+    cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true);
+    cv.setUint16(36, 0, true);
+    cv.setUint32(38, 0x81a40000, true); /* -rw-r--r-- */
+    cv.setUint32(42, offset, true);
+    cdh.set(nameBytes, 46);
+    centralParts.push(cdh);
+
+    offset += lfh.length + size;
+  }
+
+  let cdSize = 0;
+  centralParts.forEach((p) => { cdSize += p.length; });
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(4, 0, true);
+  ev.setUint16(6, 0, true);
+  ev.setUint16(8, entries.length, true);
+  ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cdSize, true);
+  ev.setUint32(16, offset, true);
+  ev.setUint16(20, 0, true);
+
+  return new Blob([...localParts, ...centralParts, eocd], { type: 'application/zip' });
+}
+
+window.QCCapture = { download, downloadPdf, toPdfBytes, appendPdf, savePdfDoc, buildZip, downloadBlob, fileName, toCanvas };
 })();
