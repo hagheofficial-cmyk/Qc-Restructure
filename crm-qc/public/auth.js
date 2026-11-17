@@ -59,6 +59,7 @@ const QCAuth = {
   },
   clear() {
     if (window.UI && window.UI.api.clearCache) window.UI.api.clearCache(true);
+    if (window.QCLocalSync && typeof window.QCLocalSync.reset === 'function') window.QCLocalSync.reset();
     this.user = null; this.token = ''; this._bootstrap = null; safeRemove(TOKEN_KEY);
   },
 
@@ -98,7 +99,10 @@ const QCAuth = {
         if (me && me.required && me.user) {
           /* Permissions may have changed while the tab was closed. Never reuse
            * data cached under the previous identity/scope for the same token. */
-          if (JSON.stringify(saved) !== JSON.stringify(me.user) && api.clearCache) api.clearCache(true);
+          if (JSON.stringify(saved) !== JSON.stringify(me.user)) {
+            if (api.clearCache) api.clearCache(true);
+            if (window.QCLocalSync && typeof window.QCLocalSync.reset === 'function') window.QCLocalSync.reset();
+          }
           this.required = true; this.accounts = me.accounts || []; this.user = me.user;
           this.mode = 'auto'; this.persist(); this.syncLocalSession(); return true;
         }
@@ -147,6 +151,11 @@ const QCAuth = {
 
   async logout() {
     const api = window.UI.api;
+    try {
+      if (window.QCLocalSync && typeof window.QCLocalSync.flush === 'function' && window.QCLocalSync.hasPending()) {
+        await window.QCLocalSync.flush();
+      }
+    } catch (e) { /* بی‌اثر */ }
     try { await api.post('/api/auth/logout', { token: this.token }); } catch (e) { /* بی‌اثر */ }
     this.clear();
     if (window.LocalApi && window.LocalApi.setSession) window.LocalApi.setSession(null);

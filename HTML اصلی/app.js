@@ -95,6 +95,9 @@ const api = {
   },
   async req(method,url,body){
     url = App.withDateRange(url, method);
+    if (!api.offline && window.QCLocalSync && window.QCLocalSync.isActive()) {
+      return window.QCLocalSync.intercept(method, url, body, (m, u, b) => this._request(m, u, b));
+    }
     const write = method !== 'GET';
     const token = window.QCAuth && window.QCAuth.token;
     if (!write && token && !api.offline && readCache.allowed(url) && !this._writes.size)
@@ -1244,6 +1247,10 @@ const App = {
     this.initDateRange();
     this.renderUserChip();
     if (window.QCAuth) window.QCAuth.applyNav();
+    if (!api.offline && window.QCLocalSync && window.QCLocalSync.isActive()) {
+      window.QCLocalSync.setRawRequest((m, u, b) => api._request(m, u, b));
+      window.QCLocalSync.hydrate(false);
+    }
     await this.refreshCounts();
     $('#dataSourceBadge').textContent = window.APP_SCRIPT_MODE ? 'Google Sheets' : api.offline ? 'آفلاین' : 'سرور';
     this.startSyncWatch();
@@ -1271,12 +1278,18 @@ const App = {
     clearInterval(this._syncTimer);
     this._syncTimer = setInterval(async () => {
       if (document.hidden) return;
+      if (window.QCLocalSync && window.QCLocalSync.hasPending()) return;
       try {
         const res = await api.get('/api/revision');
-        const rev = Number((res && res.revision) || 0);
+        const rawRev = res && res.revision != null ? String(res.revision) : '';
+        const rev = Number(rawRev.split('-')[0] || 0);
         if (!rev) return;
-        if (this._syncRevision && rev !== this._syncRevision) this.markStale(rev);
-        else this._syncRevision = rev;
+        if (this._syncRevision && rev !== this._syncRevision) {
+          if (window.QCLocalSync && window.QCLocalSync.isActive() && !window.QCLocalSync.hasPending()) {
+            await window.QCLocalSync.hydrate(true);
+          }
+          this.markStale(rev);
+        } else this._syncRevision = rev;
       } catch (e) { /* سرور قدیمی یا آفلاین: بی‌صدا رد می‌شویم */ }
     }, 45000);
   },
@@ -1320,6 +1333,10 @@ const App = {
     try {
       this._rangeReady = false;
       readCache.clear(false);
+      if (window.QCLocalSync && window.QCLocalSync.isActive()) {
+        await window.QCLocalSync.flush();
+        await window.QCLocalSync.hydrate(true);
+      }
       await this.boot();
       await this.route();
       this._pendingRevision = 0;

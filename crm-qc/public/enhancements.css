@@ -575,6 +575,11 @@ body.auth-locked #app { filter: blur(2px); pointer-events: none; }
 .sync-chip { border-color: rgba(52,211,153,.45); color: var(--good); }
 .sync-chip.pulse { animation: syncPulse 2.4s ease-in-out infinite; }
 @keyframes syncPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,.35); } 50% { box-shadow: 0 0 0 7px rgba(52,211,153,0); } }
+.sync-status-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 99px; font-size: 11px; font-weight: 700; border: 1px solid var(--line); background: var(--panel-soft); color: var(--muted); white-space: nowrap; cursor: pointer; }
+.sync-status-pill.ok { border-color: rgba(52,211,153,.45); background: var(--good-soft); color: var(--good); }
+.sync-status-pill.busy { border-color: rgba(56,189,248,.45); background: var(--brand-soft); color: var(--brand); }
+.sync-status-pill.warn { border-color: rgba(251,191,36,.5); background: var(--warn-soft); color: var(--warn); }
+.sync-status-pill.bad { border-color: rgba(248,113,113,.6); background: var(--bad-soft); color: var(--bad); animation: syncPulse 2s ease-in-out infinite; }
 
 /* کمبو: هایلایت تطبیق فازی و گزینه‌ی فعال با کیبورد (بند ۷) */
 .combo .menu { max-height: 264px; overflow-y: auto; }

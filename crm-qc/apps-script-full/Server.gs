@@ -108,6 +108,9 @@ var QC_GAS_ANALYSIS_MAX_CHARS = 900000;
 var QC_GAS_TOKEN_PREFIX = 'qctok@';
 var QC_GAS_TOKEN_EPOCH_KEY = 'QC_GAS_TOKEN_EPOCH';
 var QC_GAS_TOKEN_TTL_SEC = 21600; // ۶ ساعت؛ با هر درخواست تمدید می‌شود
+/* کش یکتاپذیری عملیات نوشتن (Idempotency): جلوگیری از ثبت تکراری در صورت تلاش مجدد شبکه */
+var QC_GAS_OP_PREFIX = 'qcop@';
+var QC_GAS_OP_TTL_SEC = 600;
 /* آیکون سربرگ مرورگر (favicon). به‌صورت پیش‌فرض روی لوگوی رسمی سامانه تنظیم است؛
  * برای لوگوی اختصاصی دیگر می‌توانید کلید QC_GAS_FAVICON_URL را در Script Properties قرار دهید. */
 var QC_GAS_FAVICON_KEY = 'QC_GAS_FAVICON_URL';
@@ -331,18 +334,53 @@ function crmqcApi(method, requestUrl, body, token) {
     return { status: 200, data: { revision: currentRevision_(), at: Date.now() } };
   }
 
+  /* بررسی وجود شناسه شیت بدون فراخوانی زودهنگام SpreadsheetApp.openById:
+   * در مسیرهای خواندنی که تب‌ها در CacheService هستند، اصلاً openById صدا زده نمی‌شود. */
+  var spreadsheetId = PropertiesService.getScriptProperties().getProperty(QC_GAS_ID_KEY);
+  if (!spreadsheetId) {
+    return { status: 503, data: { error: 'ابتدا تابع setupStandaloneApp_ را از شیت مقصد اجرا کنید.' } };
+  }
+  var ssCached = null;
+  var getSs_ = function () {
+    if (!ssCached) ssCached = SpreadsheetApp.openById(spreadsheetId);
+    return ssCached;
+  };
+
+  /* استخراج کلید یکتاپذیری (Idempotency) برای جلوگیری از ثبت تکراری در تلاش مجدد */
+  var clientOpId = (!isRead && body && typeof body.__opId === 'string') ? String(body.__opId).trim().slice(0, 80) : '';
+  if (clientOpId) {
+    body = Object.assign({}, body);
+    delete body.__opId;
+  }
+
   var lock = LockService.getScriptLock();
   var locked = false;
   try {
-    var ss;
     if (!isRead) { lock.waitLock(30000); locked = true; }
-    try {
-      ss = getDatabaseSpreadsheet_();
-    } catch (error) {
-      return { status: 503, data: { error: error.message || 'شیت دیتابیس پیدا نشد.' } };
-    }
 
     var revision = currentRevision_();
+
+    /* مسیر تجمیعی همگام‌سازی صف کلاینت (FIFO Batch Sync):
+     * چند تغییر پشت‌سرهم زیر یک قفل، یک خواندن و یک نوشتن دیف روی شیت ثبت می‌شوند. */
+    if (!isRead && pathOnly === '/api/batch-sync') {
+      return executeBatchSync_(getSs_, token, body, revision);
+    }
+
+    /* مسیر سریع کش تحلیل برای GET: پیش از بارگذاری تب‌های سنگین و بدون openById،
+     * نشست را فقط از کش qcUsers/settings بررسی می‌کنیم و اگر پاسخ در کش بود برمی‌گردانیم. */
+    if (isRead && !authPath && pathOnly !== '/api/local-sync' && cacheableRead_(pathOnly)) {
+      var resolvedPre = resolveSession_(token);
+      if (resolvedPre) {
+        var authDb = readDatabase_(getSs_, ['qcUsers', 'settings'], { publish: true });
+        var preSession = refreshSession_(resolvedPre, authDb);
+        if (preSession) {
+          var preKey = analysisCacheKey_(revision, requestUrl, preSession);
+          var preCached = readAnalysisCache_(preKey);
+          if (preCached) return { status: 200, data: preCached, cached: true, revision: revision };
+        }
+      }
+    }
+
     /* تلاش دوم فقط وقتی رخ می‌دهد که مسیری تبی را تغییر داده باشد که در
      * خواندن جزئی بارگذاری نشده بود؛ آن‌گاه کل داده خوانده و روت دوباره اجرا
      * می‌شود تا هیچ تغییری گم نشود. */
@@ -350,8 +388,8 @@ function crmqcApi(method, requestUrl, body, token) {
       var readInfo = {};
       /* خواندن جزئی: هر تب از کشِ خودش یا از شیت. مسیر نوشتنی فقط تب‌های موردنیاز
        * خودش را بارگذاری می‌کند، پس ثبت یک ریت دیگر کل شیت را نمی‌خواند. */
-      var wanted = attempt > 0 ? null : wantedTabsFor_(method, pathOnly, body);
-      var before = normalizeDatabase_(readDatabase_(ss, wanted, readInfo));
+      var wanted = (attempt > 0 || (isRead && pathOnly === '/api/local-sync')) ? null : wantedTabsFor_(method, pathOnly, body);
+      var before = normalizeDatabase_(readDatabase_(getSs_, wanted, readInfo));
       before.settings.authMode = 'on';
 
       /* نشست: توکن از کش، نقش و دسترسی‌ها همیشه از داده‌ی تازه‌ی شیت */
@@ -360,13 +398,25 @@ function crmqcApi(method, requestUrl, body, token) {
         return { status: 401, data: { error: 'برای این کار باید وارد سامانه شوید.' } };
       }
 
+      /* اسنپ‌شات احرازشده و محدودشده برای موتور محلی مرورگر (Local-First) */
+      if (isRead && pathOnly === '/api/local-sync') {
+        return { status: 200, data: buildLocalSyncPayload_(before, session, revision), revision: revision };
+      }
+
+      /* بررسی Idempotency برای عملیات نوشتنی تکی: اگر قبلاً همین opId ثبت شده،
+       * دقیقاً همان پاسخ قبلی برگردانده می‌شود بدون ایجاد ردیف تکراری. */
+      if (!isRead && clientOpId && session) {
+        var prevOp = readOpLedger_(session, clientOpId);
+        if (prevOp) return prevOp;
+      }
+
       /* کش نتیجه‌ی تحلیل‌ها (بند ۸): کلید = نسخه‌ی داده + کاربر + درخواست.
        * با هر نوشتن نسخه عوض می‌شود، پس پاسخ کهنه هرگز خوانده نمی‌شود. */
       var analysisKey = isRead && !!session && !authPath && cacheableRead_(pathOnly)
         ? analysisCacheKey_(revision, requestUrl, session) : null;
       if (analysisKey) {
         var cached = readAnalysisCache_(analysisKey);
-        if (cached) return { status: 200, data: cached, cached: true };
+        if (cached) return { status: 200, data: cached, cached: true, revision: revision };
       }
 
       /* دیگر هیچ کپی عمیقی از کل دیتابیس ساخته نمی‌شود: برای نوشتن‌ها پیش از اجرای
@@ -409,12 +459,12 @@ function crmqcApi(method, requestUrl, body, token) {
              * خودش شمارش داده‌ی مجاز را از /api/data/status می‌گیرد. */
             var unrestricted = !!session && (session.role === 'admin' || session.unrestricted);
             payload.counts = unrestricted
-              ? Object.assign({}, payload.counts, fastCounts_(ss), { partial: false })
+              ? Object.assign({}, payload.counts, fastCounts_(getSs_()), { partial: false })
               : Object.assign({}, payload.counts, { partial: true });
           }
         }
         if (analysisKey) writeAnalysisCache_(analysisKey, payload);
-        return { status: 200, data: payload };
+        return { status: 200, data: payload, revision: revision };
       }
 
       if (authPath && pathOnly === '/api/auth/logout') dropToken_(token);
@@ -423,7 +473,7 @@ function crmqcApi(method, requestUrl, body, token) {
         result.token = issueToken_(session);
         /* داده‌ی اولیه همراه پاسخ ورود: کلاینت بلافاصله بعد از رمز، یک درخواست
          * کامل دیگر نمی‌گیرد (صفحه‌ی ورود سریع باز می‌شود). */
-        result.bootstrap = bootstrapFor_(session, ss);
+        result.bootstrap = bootstrapFor_(session, getSs_());
       }
 
       /* پاسخ پیش از هر دست‌کاریِ داده ساخته می‌شود تا بعداً بتوان خودِ db زنده را
@@ -443,18 +493,19 @@ function crmqcApi(method, requestUrl, body, token) {
        * (دو رشته‌سازی کامل) حذف شد و تشخیص تغییر به همان مقایسهٔ تب‌به‌تبِ
        * writeDatabaseDiffFp_ سپرده شد. */
       if (window.__GAS_DB_DIRTY__) markSelfWrite_();
-      var changedTabs = writeDatabaseDiffFp_(ss, beforeJson, live, false, readInfo.loaded);
+      var changedTabs = writeDatabaseDiffFp_(getSs_(), beforeJson, live, false, readInfo.loaded);
       /* در بازیابی بک‌اپ کامل، تنظیمات ذخیره‌شده‌ی گزارش تماس نیز بازیابی می‌شوند. */
       if (pathOnly === '/api/backup' && method === 'POST') {
         var bSrc = (body && body.backup) || body || {};
         if (bSrc && bSrc.callReportStorage && typeof bSrc.callReportStorage === 'object') {
+          var backupSs = getSs_();
           Object.keys(QC_GAS_CALL_REPORT_KEYS).forEach(function (crKey) {
             if (bSrc.callReportStorage[crKey] == null) return;
             var crText = typeof bSrc.callReportStorage[crKey] === 'string'
               ? bSrc.callReportStorage[crKey] : JSON.stringify(bSrc.callReportStorage[crKey]);
             try {
               if (crText) JSON.parse(crText);
-              var crSheet = ss.getSheetByName(QC_GAS_CALL_REPORT_KEYS[crKey]);
+              var crSheet = backupSs.getSheetByName(QC_GAS_CALL_REPORT_KEYS[crKey]);
               if (crSheet) {
                 markSelfWrite_();
                 var crVals = crText ? [['json'], [crText]] : [['json']];
@@ -473,18 +524,237 @@ function crmqcApi(method, requestUrl, body, token) {
         responseRevision = bumpRevision_();
         publishAfterWrite_(responseRevision, changedTabs, changedTabs.db);
       }
+      var finalResp = { status: 200, data: data, revision: responseRevision };
+      if (clientOpId && session) writeOpLedger_(session, clientOpId, finalResp);
       /* شماره‌ی نسخه در پاسخ نوشتن برمی‌گردد تا کلاینت بدون یک رفت‌وبرگشت
        * اضافه (/api/revision) بداند داده‌اش تازه است. */
-      return { status: 200, data: data, revision: responseRevision };
+      return finalResp;
     }
   } catch (error) {
+    var errData = { error: String(error && error.message || 'خطای Apps Script') };
+    if (error && error.conflict) errData.conflict = jsonSafe_(error.conflict);
     return {
       status: Number(error && error.status) || 500,
-      data: { error: String(error && error.message || 'خطای Apps Script') }
+      data: errData
     };
   } finally {
     if (locked) { try { lock.releaseLock(); } catch (ignored) {} }
     try { window.LocalApi.setSession(null); } catch (ignored) {}
+  }
+}
+
+/* ------------------------------------------- اسنپ‌شات محلی + Idempotency + Batch Sync */
+
+function opLedgerKey_(session, opId) {
+  var who = session && session.name ? String(session.name).trim().toLowerCase() : 'anon';
+  return QC_GAS_OP_PREFIX + digestHex_(who + '\u0001' + String(opId || '')).slice(0, 40);
+}
+
+function readOpLedger_(session, opId) {
+  if (!opId) return null;
+  try {
+    var raw = CacheService.getScriptCache().get(opLedgerKey_(session, opId));
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (err) {
+    return null;
+  }
+}
+
+function writeOpLedger_(session, opId, responseObj) {
+  if (!opId || !responseObj) return;
+  try {
+    var json = JSON.stringify(responseObj);
+    if (json && json.length < 90000) {
+      CacheService.getScriptCache().put(opLedgerKey_(session, opId), json, QC_GAS_OP_TTL_SEC);
+    }
+  } catch (err) {}
+}
+
+/* ساخت اسنپ‌شات امن و سبک برای موتور محلی مرورگر:
+ * - برای کاربر غیرمدیر دقیقاً با QCAccess.scopeDb محدود می‌شود.
+ * - هش رمزها هرگز ارسال نمی‌شود (qcUsers ماسک یا خالی می‌شود).
+ * - callRaw حجیم حذف می‌شود تا دانلود اسنپ‌شات بسیار سریع بماند. */
+function buildLocalSyncPayload_(db, session, revision) {
+  var isAdmin = window.QCAccess.isAdmin(session);
+  var scoped = isAdmin ? jsonSafe_(db) : jsonSafe_(window.QCAccess.scopeDb(db, session));
+  scoped.callRaw = null;
+  if (isAdmin) {
+    scoped.qcUsers = window.QCAccess.userMask(window.QCAccess.normalizeUsers(db));
+  } else {
+    scoped.qcUsers = [];
+  }
+  return {
+    revision: revision,
+    at: Date.now(),
+    user: window.QCAccess.publicUser(session),
+    db: scoped
+  };
+}
+
+function batchEntityKind_(pathOnly) {
+  var m = String(pathOnly || '').match(/^\/api\/(tickets|socials|actions|reminders|agents)(?:\/([^/?#]+))?$/);
+  if (!m) return null;
+  return { kind: m[1], id: m[2] != null ? decodeURIComponent(m[2]) : null };
+}
+
+function executeBatchSync_(getSs_, token, body, revision) {
+  var rawSess = resolveSession_(token);
+  if (!rawSess) return { status: 401, data: { error: 'برای این کار باید وارد سامانه شوید.' } };
+
+  var ops = Array.isArray(body && body.ops) ? body.ops : [];
+  if (!ops.length) {
+    var checkDb = normalizeDatabase_(readDatabase_(getSs_, [QC_GAS_SHEETS.meta, QC_GAS_SHEETS.qcUsers]));
+    checkDb.settings.authMode = 'on';
+    if (!refreshSession_(rawSess, checkDb)) return { status: 401, data: { error: 'برای این کار باید وارد سامانه شوید.' } };
+    return { status: 200, data: { results: [], revision: revision }, revision: revision };
+  }
+  if (ops.length > 50) return { status: 400, data: { error: 'تعداد عملیات در یک بسته بیش از حد مجاز است.' } };
+
+  /* اعتبارسنجی امنیتی همه‌ی عملیات بسته قبل از اجرا */
+  for (var v = 0; v < ops.length; v++) {
+    var chk = ops[v] || {};
+    var cm = String(chk.method || 'POST').toUpperCase();
+    var cu = String(chk.url || '/');
+    var cp = cu.split('?')[0];
+    var cb = chk.body && typeof chk.body === 'object' ? chk.body : {};
+    if (cm === 'GET' || cp.indexOf('/api/') !== 0 || cp.indexOf('/api/auth/') === 0 ||
+        cp === '/api/session-snapshot' || cp.indexOf('/api/session-snapshot/') === 0 ||
+        cp === '/api/batch-sync' || cp === '/api/local-sync') {
+      return { status: 403, data: { error: 'مسیر مجاز برای همگام‌سازی دسته‌ای نیست: ' + cp } };
+    }
+    if ((cp === '/api/settings' || cp.indexOf('/api/settings/') === 0) && cb.authMode && cb.authMode !== 'on') {
+      return { status: 403, data: { error: 'ورود اجباری است و نمی‌توان آن را خاموش کرد.' } };
+    }
+    if (cp.indexOf('/api/qc-users') === 0 && cb.password && String(cb.password).trim().length < 12) {
+      return { status: 400, data: { error: 'رمز جدید باید حداقل ۱۲ نویسه باشد.' } };
+    }
+  }
+
+  /* اجتماع تب‌های موردنیاز همه‌ی عملیات بسته تا فقط یک‌بار از کش/شیت خوانده شود */
+  var wantedSet = {};
+  var needAll = false;
+  for (var w = 0; w < ops.length; w++) {
+    var opW = ops[w] || {};
+    var opTabs = wantedTabsFor_(String(opW.method || 'POST').toUpperCase(), String(opW.url || '/').split('?')[0], opW.body || {});
+    if (!opTabs) { needAll = true; break; }
+    for (var t = 0; t < opTabs.length; t++) wantedSet[opTabs[t]] = 1;
+  }
+
+  for (var attempt = 0; ; attempt++) {
+    var readInfo = {};
+    var wanted = (attempt > 0 || needAll) ? null : Object.keys(wantedSet);
+    var before = normalizeDatabase_(readDatabase_(getSs_, wanted, readInfo));
+    before.settings.authMode = 'on';
+
+    var session = refreshSession_(resolveSession_(token), before);
+    if (!session) return { status: 401, data: { error: 'برای این کار باید وارد سامانه شوید.' } };
+
+    var beforeJson = diffFingerprints_(before);
+    window.LocalApi.adoptSnapshot(before);
+    window.LocalApi.setSession(session);
+    window.__GAS_DB_DIRTY__ = false;
+
+    var results = [];
+    var idMap = {};
+    var failedCreates = {};
+    var newlySucceeded = [];
+
+    for (var i = 0; i < ops.length; i++) {
+      var op = ops[i] || {};
+      var opId = typeof op.opId === 'string' ? op.opId.trim().slice(0, 80) : '';
+      var opMethod = String(op.method || 'POST').toUpperCase();
+      var opUrl = String(op.url || '/');
+      var opBody = op.body && typeof op.body === 'object' ? Object.assign({}, op.body) : {};
+      delete opBody.__opId;
+      var tempId = op.tempId != null && op.tempId !== '' ? String(op.tempId) : '';
+      var localUpdatedAt = op.localUpdatedAt ? String(op.localUpdatedAt) : '';
+
+      /* اگر همین opId قبلاً با موفقیت ثبت شده بود (تلاش مجدد شبکه)، دوباره اجرا نشود */
+      if (opId) {
+        var replay = readOpLedger_(session, opId);
+        if (replay && replay.ok) {
+          if (tempId && replay.kind && replay.data && replay.data.id != null) {
+            idMap[replay.kind + ':' + tempId] = { id: replay.data.id, updatedAt: replay.data.updatedAt || '', localUpdatedAt: localUpdatedAt };
+          }
+          results.push(replay);
+          continue;
+        }
+      }
+
+      /* بازنویسی شناسه‌ی موقت (tempId) به شناسه‌ی واقعی سرور در عملیات وابسته‌ی همین بسته */
+      var pathPart = opUrl.split('?')[0];
+      var qsPart = opUrl.indexOf('?') >= 0 ? opUrl.slice(opUrl.indexOf('?')) : '';
+      var parsed = batchEntityKind_(pathPart);
+      if (parsed && parsed.id != null) {
+        var depKey = parsed.kind + ':' + parsed.id;
+        if (failedCreates[depKey]) {
+          results.push({ opId: opId, ok: false, status: 409, error: 'ایجاد رکورد قبلی ناموفق بود؛ ویرایش/حذف لغو شد.' });
+          continue;
+        }
+        if (idMap[depKey]) {
+          var mapped = idMap[depKey];
+          opUrl = '/api/' + parsed.kind + '/' + encodeURIComponent(String(mapped.id)) + qsPart;
+          if (opMethod === 'PUT' && mapped.updatedAt) {
+            if (!opBody.baseUpdatedAt || opBody.baseUpdatedAt === mapped.localUpdatedAt) {
+              opBody.baseUpdatedAt = mapped.updatedAt;
+            }
+          }
+        }
+      }
+
+      try {
+        var res = jsonSafe_(window.LocalApi.run(opMethod, opUrl, opBody));
+        var entry = { opId: opId, ok: true, status: 200, data: res, tempId: tempId || undefined, kind: parsed ? parsed.kind : undefined };
+        if (opMethod === 'POST' && parsed && parsed.id == null && tempId && res && res.id != null) {
+          idMap[parsed.kind + ':' + tempId] = { id: res.id, updatedAt: res.updatedAt || '', localUpdatedAt: localUpdatedAt };
+        }
+        if (opMethod === 'PUT' && parsed && parsed.id != null && res && res.updatedAt) {
+          var putKey = parsed.kind + ':' + parsed.id;
+          var resolvedId = (idMap[putKey] && idMap[putKey].id) || res.id || parsed.id;
+          idMap[putKey] = { id: resolvedId, updatedAt: res.updatedAt, localUpdatedAt: localUpdatedAt };
+          var serverPutKey = parsed.kind + ':' + String(resolvedId);
+          idMap[serverPutKey] = { id: resolvedId, updatedAt: res.updatedAt, localUpdatedAt: localUpdatedAt };
+        }
+        results.push(entry);
+        if (opId) newlySucceeded.push(entry);
+      } catch (opErr) {
+        var failStatus = Number(opErr && opErr.status) || 500;
+        var failEntry = {
+          opId: opId,
+          ok: false,
+          status: failStatus,
+          error: String(opErr && opErr.message || 'خطا در اجرای عملیات')
+        };
+        if (opErr && opErr.conflict) failEntry.conflict = jsonSafe_(opErr.conflict);
+        if (opMethod === 'POST' && parsed && parsed.id == null && tempId) {
+          failedCreates[parsed.kind + ':' + tempId] = true;
+        }
+        results.push(failEntry);
+      }
+    }
+
+    var live = window.LocalApi.liveDb();
+    var missing = missingTabs_(beforeJson, live, readInfo.loaded);
+    if (missing.length && attempt === 0) {
+      continue;
+    }
+
+    if (window.__GAS_DB_DIRTY__) markSelfWrite_();
+    var changedTabs = writeDatabaseDiffFp_(getSs_(), beforeJson, live, false, readInfo.loaded);
+    var responseRevision = currentRevision_();
+    if (changedTabs.length) {
+      responseRevision = bumpRevision_();
+      publishAfterWrite_(responseRevision, changedTabs, changedTabs.db);
+    }
+    for (var s = 0; s < newlySucceeded.length; s++) {
+      writeOpLedger_(session, newlySucceeded[s].opId, newlySucceeded[s]);
+    }
+    return {
+      status: 200,
+      revision: responseRevision,
+      data: { results: results, revision: responseRevision }
+    };
   }
 }
 
@@ -1017,7 +1287,7 @@ function wantedTabsFor_(method, pathOnly, body) {
     var touchesRecords = !!(body && (body.name !== undefined || body.team !== undefined));
     heavy = touchesRecords ? ['tickets', 'socials', 'callFeedbacks', 'callSituational', 'monthlyScores', 'agentActions', 'agents'] : [];
   }
-  else if (p.indexOf('/api/qc-agents') === 0) heavy = [];
+  else if (p.indexOf('/api/qc-agents') === 0 || p.indexOf('/api/action-types') === 0) heavy = [];
   else if (p.indexOf('/api/qc-users') === 0 || p.indexOf('/api/auth') === 0 ||
     p.indexOf('/api/fiscal-months') === 0 || p.indexOf('/api/criteria') === 0 ||
     p.indexOf('/api/settings') === 0 || p.indexOf('/api/elements') === 0) heavy = [];
@@ -1175,15 +1445,24 @@ function gridRows_(sheet) {
  *    (ثبت یک ریت دیگر تماس‌ها و سوشال‌های چند هزار سطری را نمی‌خواند).
  * `info` در صورت ارسال، {loaded, fresh} را پر می‌کند تا نوشتن فقط همان تب‌ها را بنویسد.
  */
-function readDatabase_(ss, wanted, info) {
-  var sheets = sheetMap_(ss);
-  var sheetTz = spreadsheetTimeZone_(ss);
+function readDatabase_(ssOrFn, wanted, info) {
+  var ss = null;
+  var sheets = null;
+  var sheetTz = null;
+  function ensureSheets_() {
+    if (!sheets) {
+      ss = typeof ssOrFn === 'function' ? ssOrFn() : ssOrFn;
+      sheets = sheetMap_(ss);
+      sheetTz = spreadsheetTimeZone_(ss);
+    }
+    return sheets;
+  }
   var keys = wanted && wanted.length ? wanted : null; // null = همه‌ی تب‌ها
   var need = function (key) { return !keys || keys.indexOf(key) >= 0; };
   var cached = {};
   try { cached = readTabsCache_(keys || QC_GAS_TAB_KEYS); } catch (err) { cached = {}; }
   var fresh = {};
-  /* مقدار خام تب: اول کش، بعد شیت */
+  /* مقدار خام تب: اول کش، بعد شیت (در حالت کشِ گرم اصلاً openById و getSheets صدا زده نمی‌شود) */
   function raw(key, reader) {
     if (!need(key)) return null;
     if (cached[key] !== undefined) return cached[key];
@@ -1192,14 +1471,19 @@ function readDatabase_(ss, wanted, info) {
     return value;
   }
   function rows(sheetName) {
-    return readRowsGrid_(gridValues_(sheets[sheetName]), sheetTz);
+    var map = ensureSheets_();
+    return readRowsGrid_(gridValues_(map[sheetName]), sheetTz);
+  }
+  function kv(sheetName) {
+    var map = ensureSheets_();
+    return readKeyValueGrid_(gridValues_(map[sheetName]), sheetTz);
   }
 
-  var meta = raw('meta', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.meta]), sheetTz); }) || {};
-  var settings = raw('settings', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.settings]), sheetTz); }) || {};
-  var lists = raw('lists', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.lists]), sheetTz); }) || {};
-  var criteria = raw('criteria', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.criteria]), sheetTz); }) || {};
-  var callMeta = raw('callMeta', function () { return readKeyValueGrid_(gridValues_(sheets[QC_GAS_SHEETS.callMeta]), sheetTz); }) || {};
+  var meta = raw('meta', function () { return kv(QC_GAS_SHEETS.meta); }) || {};
+  var settings = raw('settings', function () { return kv(QC_GAS_SHEETS.settings); }) || {};
+  var lists = raw('lists', function () { return kv(QC_GAS_SHEETS.lists); }) || {};
+  var criteria = raw('criteria', function () { return kv(QC_GAS_SHEETS.criteria); }) || {};
+  var callMeta = raw('callMeta', function () { return kv(QC_GAS_SHEETS.callMeta); }) || {};
 
   var agentActions = raw('agentActions', function () {
     var map = {};

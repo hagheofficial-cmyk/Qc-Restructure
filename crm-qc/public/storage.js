@@ -51,10 +51,13 @@ function saveDb(sync) {
     window.__GAS_DB_DIRTY__ = true;
     return;
   }
+  /* در حالت Web App گوگل Apps Script، داده‌های احرازشده فقط در RAM و کش
+   * توکن‌محور localSync.js نگه داشته می‌شوند و روی localStorage عمومی نمی‌نشینند. */
+  if (window.APP_SCRIPT_MODE) return;
   if (sync) return w();
   clearTimeout(saveTimer); saveTimer = setTimeout(w, 300);
 }
-if (typeof window.addEventListener === 'function') window.addEventListener('pagehide', () => saveDb(true));
+if (typeof window.addEventListener === 'function') window.addEventListener('pagehide', () => { if (!window.APP_SCRIPT_MODE) saveDb(true); });
 
 const str = (v) => (v == null ? '' : String(v)).trim();
 const text = str; /* نام دیگر str؛ در لایه‌ی دسترسی/ماه مالی استفاده می‌شود */
