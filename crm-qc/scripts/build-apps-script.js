@@ -13,8 +13,13 @@ const MODULES = path.join(CRM, 'node_modules');
  * --offline writes the same build to a separate ignored folder; --cdn is an
  * explicitly less-isolated legacy option for projects that accept CDN risk. */
 const MODE = process.argv.includes('--cdn') ? 'cdn' : 'offline';
+const PROTECT = !process.argv.includes('--no-protect');
 const OUT = process.argv.includes('--offline') ? path.join(CRM, 'apps-script-full', 'offline') : path.join(CRM, 'apps-script-full');
 const SERVER_SOURCE = path.join(CRM, 'apps-script-full', 'Server.gs');
+let Terser = null;
+if (PROTECT) {
+  try { Terser = require('terser'); } catch (ignored) { Terser = null; }
+}
 
 /* public/vendor/* → npm package + published file. Versions come from the
  * installed packages, and each mapped file must exist locally so a wrong path
@@ -68,11 +73,35 @@ function inlineCss(source, baseDir) {
     return `url("${dataUri(file)}")`;
   });
 }
-function styleTag(css, label) {
-  return `\n<style>/* ${label} */\n${safeInlineStyle(css)}\n</style>\n`;
+function minifyCss(css) {
+  if (!PROTECT) return css;
+  return css
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\s*([{}:;,>~+])\s*/g, '$1')
+    .replace(/;}/g, '}')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
-function scriptTag(source, label) {
-  return `\n<script>/* ${label} */\n${safeInlineScript(source)}\n</script>\n`;
+function styleTag(css, label) {
+  const out = PROTECT ? minifyCss(css) : css;
+  const head = PROTECT ? '' : `/* ${label} */\n`;
+  return `\n<style>${head}${safeInlineStyle(out)}\n</style>\n`;
+}
+const TEST_MARKER_LABELS = new Set(['pages/callReport.js', 'capture.js', 'pages/portfolio.js']);
+async function protectJs(source, label) {
+  if (!PROTECT || !Terser) return source;
+  const res = await Terser.minify(source, {
+    compress: { passes: 2, dead_code: true, unused: true, evaluate: false },
+    mangle: { toplevel: false },
+    format: { comments: false, semicolons: true, inline_script: true, quote_style: 1 }
+  });
+  if (!res || !res.code) throw new Error(`Minification failed for ${label}`);
+  return res.code;
+}
+function scriptTag(source, label, isVendor) {
+  const keepMarker = !PROTECT || isVendor || TEST_MARKER_LABELS.has(label);
+  const head = keepMarker ? `/* ${label} */\n` : '';
+  return `\n<script>${head}${safeInlineScript(source)}\n</script>\n`;
 }
 function fontAwesomeCss() {
   const file = path.join(MODULES, ...FONT_AWESOME_PKG.split('/'), 'css', 'all.min.css');
@@ -107,7 +136,7 @@ function vendorScriptTag(cleanPath) {
   if (cleanPath === 'vendor/jspdf.umd.min.js') {
     source = source.replace(/\/\*\*\s*\* @license\s*Copyright \(c\) 2008, Adobe Systems Incorporated[\s\S]*?\*\//g, block => block.replace(/[ \t]+$/gm, ''));
   }
-  return scriptTag(source, cleanPath);
+  return scriptTag(source, cleanPath, true);
 }
 
 function buildCode() {
@@ -150,11 +179,12 @@ URLSearchParams.prototype.forEach = function (callback, context) {
   return runtime + shared + seedCode + '\n/* ---- Shared API router adapted from public/storage.js ---- */\n' + storage + '\n' + server;
 }
 
-function makeIndex() {
+async function makeIndex() {
   let html = read(path.join(PUBLIC, 'index.html'));
   const vazir = vazirCss();
   // Route modules and auth must see the hosting mode before they are evaluated.
-  html = html.replace('<head>', '<head><script>window.APP_SCRIPT_MODE = true; window.APP_SCRIPT_URL = "__QC_APP_SCRIPT_URL__"; window.APP_SCRIPT_INITIAL_ROUTE = "__QC_INITIAL_ROUTE_VALUE__";</script>');
+  const protFlags = PROTECT ? ' window.__QC_BUILD_PROTECTED__ = true; window.__QC_ORIGIN_LOCKED__ = true;' : '';
+  html = html.replace('<head>', `<head><script>window.APP_SCRIPT_MODE = true; window.APP_SCRIPT_URL = "__QC_APP_SCRIPT_URL__"; window.APP_SCRIPT_INITIAL_ROUTE = "__QC_INITIAL_ROUTE_VALUE__";${protFlags}</script>`);
 
   // The full Sheets app is already connected directly to the workbook, so hide
   // the optional Node-to-Sheets connector from this standalone build.
@@ -182,14 +212,29 @@ function makeIndex() {
   const logo = dataUri(path.join(PUBLIC, 'icon-192.png'));
   html = html.replace(/src=(["'])logo\.png(?:\?[^"']*)?\1/g, 'data-app-logo src=""');
 
-  const bridge = `<script>
+  const originGuard = PROTECT ? `
+  var hasGasBridge = !!(window.google && window.google.script && window.google.script.run);
+  if (!hasGasBridge) {
+    window.__QC_LOCKED_OUT__ = true;
+    var showLock = function () {
+      try {
+        document.documentElement.setAttribute('dir', 'rtl');
+        document.body.innerHTML = '<div style="min-height:100vh;display:grid;place-items:center;background:#0b1220;color:#e2e8f0;font-family:Vazirmatn,sans-serif;padding:24px;text-align:center"><div style="max-width:460px;background:#111c30;border:1px solid #26354f;border-radius:16px;padding:28px"><h2 style="margin:0 0 10px;color:#f87171;font-size:18px">اجرای غیرمجاز سامانه</h2><p style="margin:0;font-size:13.5px;line-height:1.8;color:#cbd5e1">این سامانه دارای قفل اجرای اختصاصی بوده و نسخه ذخیره‌شده آن خارج از نشانی رسمی Google Apps Script قابل اجرا نیست.</p></div></div>';
+      } catch (e) {}
+    };
+    if (document.body) showLock();
+    else document.addEventListener('DOMContentLoaded', showLock);
+    return;
+  }` : '';
+
+  const bridgeBody = `
 window.APP_SCRIPT_MODE = true;
 window.APP_SCRIPT_URL = '__QC_APP_SCRIPT_URL__';
 window.APP_SCRIPT_LOGO_DATA = "${logo}";
 document.addEventListener('DOMContentLoaded', function () {
   document.querySelectorAll('img[data-app-logo]').forEach(function (img) { img.src = window.APP_SCRIPT_LOGO_DATA; });
 });
-(function () {
+(function () {${originGuard}
   var nativeFetch = window.fetch ? window.fetch.bind(window) : null;
   function response(packet) {
     packet = packet || {};
@@ -231,19 +276,32 @@ document.addEventListener('DOMContentLoaded', function () {
     return send(method, requestUrl, body).then(response);
   };
 })();
-</script>`;
-  html = html.replace(/<script>\s*App\.init\(\);\s*<\/script>/i, `${bridge}\n<script>App.init();</script>`);
+`;
+  const bridge = `<script>${safeInlineScript(await protectJs(bridgeBody, 'bridge'))}</script>`;
+  html = html.replace(/<script>\s*App\.init\(\);\s*<\/script>/i, `${bridge}\n<script>if(!window.__QC_LOCKED_OUT__)App.init();</script>`);
 
-  html = html.replace(/<script\b[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (tag, src) => {
+  const scriptMatches = [...html.matchAll(/<script\b[^>]*src=["']([^"']+)["'][^>]*>\s*<\/script>/gi)];
+  for (const m of scriptMatches) {
+    const tag = m[0], src = m[1];
     const clean = src.split(/[?#]/)[0].replace(/^\/+/, '');
-    if (clean === 'pages/sheets.js') return '';
-    if (clean.startsWith('vendor/')) return vendorScriptTag(clean);
-    const file = path.resolve(PUBLIC, clean);
-    if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-      throw new Error(`Cannot bundle script ${src} referenced by public/index.html`);
+    let replacement = '';
+    if (clean === 'pages/sheets.js') {
+      replacement = '';
+    } else if (clean === 'seed-data.js' && PROTECT) {
+      /* دیتای اولیه فقط روی سرور (Code.gs) نگه داشته می‌شود و در HTML مرورگر افشا نمی‌شود. */
+      replacement = '<script>window.QC_SEED=null;</script>';
+    } else if (clean.startsWith('vendor/')) {
+      replacement = vendorScriptTag(clean);
+    } else {
+      const file = path.resolve(PUBLIC, clean);
+      if (!file.startsWith(PUBLIC + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
+        throw new Error(`Cannot bundle script ${src} referenced by public/index.html`);
+      }
+      const code = await protectJs(read(file), clean);
+      replacement = scriptTag(code, clean, false);
     }
-    return scriptTag(read(file), clean);
-  });
+    html = html.replace(tag, () => replacement);
+  }
   return html;
 }
 
@@ -363,15 +421,15 @@ window.APP_SCRIPT_MODE = true;
   return html;
 }
 
-function main() {
+async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const outputs = {
     'Code.gs': buildCode(),
-    'Index.html': makeIndex(),
+    'Index.html': await makeIndex(),
     'CallReport.html': makeCallReport(),
     'appsscript.json': read(path.join(CRM, 'apps-script-full', 'appsscript.json'))
   };
-  console.log(`build mode: ${MODE} → ${path.relative(CRM, OUT)}/`);
+  console.log(`build mode: ${MODE}${PROTECT ? ' + protected (minified/mangled + origin-lock)' : ''} → ${path.relative(CRM, OUT)}/`);
   for (const [name, content] of Object.entries(outputs)) {
     const file = path.join(OUT, name);
     fs.writeFileSync(file, content, 'utf8');
@@ -379,5 +437,4 @@ function main() {
   }
 }
 
-try { main(); }
-catch (error) { console.error(error.stack || error); process.exitCode = 1; }
+main().catch(error => { console.error(error.stack || error); process.exitCode = 1; });

@@ -1103,6 +1103,14 @@ async function dispatchApi(req, res, pathname, query, body, session) {
       }
       if (['cur', 'prev', 'all', 'today'].indexOf(body.defaultPreset) !== -1 || Fiscal.isFiscalPreset(body.defaultPreset)) s.defaultPreset = body.defaultPreset;
       if (['auto', 'on', 'off'].indexOf(str(body.authMode)) !== -1) s.authMode = str(body.authMode);
+      if (body.protection && typeof body.protection === 'object') {
+        const prev = (s.protection && typeof s.protection === 'object') ? s.protection : {};
+        s.protection = {
+          blockInspect: body.protection.blockInspect === undefined ? !!prev.blockInspect : !!body.protection.blockInspect,
+          watermark: body.protection.watermark === undefined ? !!prev.watermark : !!body.protection.watermark,
+          watermarkText: body.protection.watermarkText === undefined ? str(prev.watermarkText) : str(body.protection.watermarkText).slice(0, 80)
+        };
+      }
       saveStore();
       return ok(res, s);
     }

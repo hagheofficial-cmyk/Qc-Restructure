@@ -135,8 +135,12 @@ function draw(root) {
           <code>QC: نام</code> دارد؛ در ردیف هر کارشناس با انتخاب «✓» (لیست کشویی) مشخص کنید چه کسی او را
           بررسی می‌کند. همین تیک‌ها در این صفحه هم دیده می‌شوند و برعکس.</div>
       </div>
-    </div>`;
+    </div>
 
+    ${renderProtectionCardHtml()}
+  `;
+
+  bindProtectionCard(root);
   $('#qcAdd').addEventListener('click', () => editor(null));
   const emptyAdd = $('#qcEmptyAdd');
   if (emptyAdd) emptyAdd.addEventListener('click', () => editor(null));
@@ -595,6 +599,107 @@ function editor(user) {
     } catch (e) { toast.error(e.message); btn.disabled = false; }
   });
 
+}
+
+function renderProtectionCardHtml() {
+  const st = (window.QCProtect && window.QCProtect.getStatus) ? window.QCProtect.getStatus() : {};
+  const cfg = (window.QCProtect && window.QCProtect.normalize)
+    ? window.QCProtect.normalize(App.state && App.state.settings)
+    : { blockInspect: !!window.APP_SCRIPT_MODE, watermark: !!window.APP_SCRIPT_MODE, watermarkText: '' };
+  return `
+    <div class="card" id="qcProtectionCard" style="margin-top:16px">
+      <div class="card-head">
+        <div class="head-icon" style="background:var(--brand-soft);color:var(--brand)"><i class="fa-solid fa-shield-halved"></i></div>
+        <div>
+          <h3>حفاظت از کد، مالکیت و جلوگیری از کپی‌برداری سامانه</h3>
+          <div class="sub">قفل اجرای اختصاصی، کد فشرده و مبهم‌شده (Minified/Mangled)، مسدودسازی ذخیره/مشاهده سورس و چک‌لیست امنیتی گوگل شیت</div>
+        </div>
+      </div>
+      <div class="card-pad" style="display:flex;flex-direction:column;gap:14px">
+        <div class="qc-sec-grid">
+          <div class="qc-sec-pill ${st.buildProtected ? 'ok' : 'warn'}">
+            <i class="fa-solid ${st.buildProtected ? 'fa-circle-check' : 'fa-circle-info'}"></i>
+            <div>
+              <div style="font-weight:800;font-size:12.6px">فشرده‌سازی و مبهم‌سازی کد (Minified & Mangled)</div>
+              <div style="font-size:11.6px;color:var(--muted);margin-top:2px">${st.buildProtected ? 'فعال — تمام کامنت‌ها، نام متغیرها و داده‌های seed از نسخه مرورگر حذف شده‌اند' : 'در نسخه خروجی Google Apps Script به‌صورت خودکار اعمال می‌شود'}</div>
+            </div>
+          </div>
+          <div class="qc-sec-pill ${st.originLocked ? 'ok' : 'warn'}">
+            <i class="fa-solid ${st.originLocked ? 'fa-lock' : 'fa-circle-info'}"></i>
+            <div>
+              <div style="font-weight:800;font-size:12.6px">قفل اجرای اختصاصی روی Google Apps Script</div>
+              <div style="font-size:11.6px;color:var(--muted);margin-top:2px">${st.originLocked ? 'فعال — فایل ذخیره‌شده روی کامپیوتر یا سرور دیگر اجرا نمی‌شود' : 'در نسخه خروجی Apps Script، ذخیره صفحه و اجرای کپی آفلاین قفل است'}</div>
+            </div>
+          </div>
+          <div class="qc-sec-pill ok">
+            <i class="fa-solid fa-server"></i>
+            <div>
+              <div style="font-weight:800;font-size:12.6px">ایزوله‌سازی کامل کد سرور و بکاپ (Code.gs)</div>
+              <div style="font-size:11.6px;color:var(--muted);margin-top:2px">کد سرور و بکاپ درایو روی سرور گوگل اجرا می‌شوند و برای کاربران وب‌اپ غیرقابل دسترس‌اند</div>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label class="qc-sec-toggle">
+            <input type="checkbox" id="protBlockInspect" ${cfg.blockInspect ? 'checked' : ''}>
+            <div>
+              <div style="font-weight:800;font-size:12.8px">مسدودسازی مشاهده سورس، ذخیره صفحه و ابزار توسعه‌دهنده</div>
+              <div style="font-size:11.8px;color:var(--muted);margin-top:2px">کلیدهای <code>Ctrl+S</code>، <code>Ctrl+U</code>، <code>F12</code>، <code>Ctrl+Shift+I</code> و کلیک راست روی بخش‌های غیرمتنی مسدود می‌شوند (کپی/پیست داخل فیلدهای فرم‌ها کاملاً آزاد می‌ماند).</div>
+            </div>
+          </label>
+          <label class="qc-sec-toggle">
+            <input type="checkbox" id="protWatermark" ${cfg.watermark ? 'checked' : ''}>
+            <div>
+              <div style="font-weight:800;font-size:12.8px">واترمارک نام کاربر واردشده روی صفحه (ضدافشا و قابل ردیابی)</div>
+              <div style="font-size:11.8px;color:var(--muted);margin-top:2px">نام کاربر و تاریخ شمسی به‌صورت محو و غیرمزاحم در پس‌زمینه نمایش داده می‌شود (در PDFهای خروجی پرونده ظاهر نمی‌شود).</div>
+            </div>
+          </label>
+          <div class="field" style="max-width:420px;margin-top:4px">
+            <label for="protWatermarkText">متن اختصاصی واترمارک (اختیاری — پیش‌فرض نام سازمان)</label>
+            <input class="input" id="protWatermarkText" value="${esc(cfg.watermarkText || '')}" placeholder="مثلاً: سامانه اختصاصی کنترل کیفیت — محرمانه" maxlength="80">
+          </div>
+          <div>
+            <button type="button" class="btn primary" id="protSaveBtn"><i class="fa-solid fa-shield-check"></i> ذخیره تنظیمات حفاظت</button>
+          </div>
+        </div>
+
+        <div class="note" style="margin:0;flex-direction:column;align-items:flex-start;gap:6px">
+          <div style="font-weight:800;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-triangle-exclamation"></i> ۴ تنظیم حیاتی در گوگل شیت و گیتهاب برای جلوگیری ۱۰۰٪ از سرقت کد (بسیار مهم):</div>
+          <ol class="qc-sec-checklist">
+            <li><b>گوگل شیت را با هیچ کاربری Share نکنید (Restricted):</b> اگر کسی دسترسی Editor یا حتی Viewer به شیت داشته باشد می‌تواند از منوی <code>File → Make a copy</code> یا <code>Extensions → Apps Script</code> کل کد سرور <code>Code.gs</code> را کپی کند!</li>
+            <li><b>در تنظیمات Share شیت (چرخ‌دنده بالا)</b> تیک <i>«Viewers and commenters can see the option to download, print, and copy»</i> را بردارید.</li>
+            <li><b>به کارشناسان فقط لینک Web App (<code>/exec</code>) بدهید:</b> استقرار را روی <code>Execute as: Me</code> بگذارید تا کاربران فقط از طریق نام کاربری/رمز خودشان وارد صفحه وب‌اپ شوند و هرگز شیت یا پروژه Apps Script را نبینند.</li>
+            <li><b>مخزن گیتهاب را Private کنید:</b> اگر مخزن GitHub عمومی (Public) باشد، هر کسی با دانستن آدرس ریپو می‌تواند سورس کامل را دانلود کند.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function bindProtectionCard(root) {
+  const btn = $('#protSaveBtn', root);
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const protection = {
+      blockInspect: !!($('#protBlockInspect', root) && $('#protBlockInspect', root).checked),
+      watermark: !!($('#protWatermark', root) && $('#protWatermark', root).checked),
+      watermarkText: ($('#protWatermarkText', root) && $('#protWatermarkText', root).value || '').trim().slice(0, 80)
+    };
+    btn.disabled = true;
+    try {
+      const updated = await api.put('/api/settings', { protection });
+      if (App.state) App.state.settings = Object.assign({}, App.state.settings || {}, updated);
+      if (window.QCProtect && window.QCProtect.apply) {
+        window.QCProtect.apply(App.state.settings, window.QCAuth ? window.QCAuth.user : null);
+      }
+      toast.success('تنظیمات حفاظت و امنیت ذخیره و اعمال شد');
+    } catch (e) {
+      toast.error(e.message || 'خطا در ذخیره تنظیمات حفاظت');
+    }
+    btn.disabled = false;
+  });
 }
 
 function debounce(fn, ms) { let t; return function (...a) { clearTimeout(t); t = setTimeout(() => fn.apply(this, a), ms); }; }

@@ -685,6 +685,14 @@ function dispatch(method, url, body) {
     }
     if (['cur', 'prev', 'all', 'today'].indexOf(b.defaultPreset) !== -1 || F.isFiscalPreset(b.defaultPreset)) db.settings.defaultPreset = b.defaultPreset;
     if (['auto', 'on', 'off'].indexOf(text(b.authMode)) !== -1) db.settings.authMode = text(b.authMode);
+    if (b.protection && typeof b.protection === 'object') {
+      const prev = (db.settings.protection && typeof db.settings.protection === 'object') ? db.settings.protection : {};
+      db.settings.protection = {
+        blockInspect: b.protection.blockInspect === undefined ? prev.blockInspect !== false : !!b.protection.blockInspect,
+        watermark: b.protection.watermark === undefined ? prev.watermark !== false : !!b.protection.watermark,
+        watermarkText: b.protection.watermarkText === undefined ? str(prev.watermarkText) : str(b.protection.watermarkText).slice(0, 80)
+      };
+    }
     saveDb(); return clone(db.settings);
   }
 

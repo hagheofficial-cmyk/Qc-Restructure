@@ -2501,25 +2501,63 @@ function writeDriveBackupFile_(db, cfg, trigger, note) {
   return { backup: entry, pruned: pruned };
 }
 
+function driveAuthUrl_() {
+  try {
+    if (typeof ScriptApp !== 'undefined' && ScriptApp && typeof ScriptApp.getAuthorizationInfo === 'function' && ScriptApp.AuthMode) {
+      var info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+      if (info && typeof info.getAuthorizationUrl === 'function') {
+        var u = info.getAuthorizationUrl();
+        if (u) return String(u);
+      }
+    }
+  } catch (ignored) {}
+  return '';
+}
+
+function classifyDriveAuthError_(err) {
+  var msg = String((err && err.message) || err || '');
+  var needsManifestScope = /Specified permissions are not sufficient|Required permissions|oauthScopes|https:\/\/www\.googleapis\.com\/auth\/drive/i.test(msg);
+  return {
+    needsAuthorization: true,
+    needsManifestScope: needsManifestScope,
+    authorizationUrl: driveAuthUrl_(),
+    authError: msg
+  };
+}
+
 function driveStatusPayload_(cfg, includeList) {
   var out = {
     supported: true,
     provider: 'google-drive',
     connected: !!(cfg && cfg.connected && cfg.folderId),
+    driveReady: false,
     needsAuthorization: false,
+    needsManifestScope: false,
+    authorizationUrl: '',
     authError: '',
     config: cfg,
     triggerActive: hasActiveDriveTrigger_(),
     backups: []
   };
-  if (out.connected && includeList !== false) {
+  if (includeList !== false) {
     try {
-      out.backups = listDriveBackupFiles_(cfg);
+      if (typeof DriveApp === 'undefined' || !DriveApp) {
+        throw new Error('You do not have permission to call DriveApp.getRootFolder');
+      }
+      DriveApp.getRootFolder();
+      out.driveReady = true;
+      if (out.connected) {
+        out.backups = listDriveBackupFiles_(cfg);
+      }
     } catch (err) {
       if (isDriveAuthError_(err)) {
+        var diag = classifyDriveAuthError_(err);
         out.needsAuthorization = true;
-        out.authError = String(err.message || err);
-      } else {
+        out.needsManifestScope = diag.needsManifestScope;
+        out.authorizationUrl = diag.authorizationUrl;
+        out.authError = diag.authError;
+        if (out.connected) out.connected = false;
+      } else if (out.connected) {
         out.config = Object.assign({}, cfg, { lastError: String(err.message || err) });
       }
     }
@@ -2755,9 +2793,13 @@ function handleDriveBackupApi_(method, pathOnly, getSs_, body, session, revision
   } catch (err) {
     if (isDriveAuthError_(err)) {
       var authStatus = driveStatusPayload_(cfg, false);
+      var diagErr = classifyDriveAuthError_(err);
       authStatus.connected = false;
+      authStatus.driveReady = false;
       authStatus.needsAuthorization = true;
-      authStatus.authError = String((err && err.message) || err);
+      authStatus.needsManifestScope = diagErr.needsManifestScope;
+      authStatus.authorizationUrl = diagErr.authorizationUrl;
+      authStatus.authError = diagErr.authError;
       return { status: 200, data: authStatus, revision: revision };
     }
     var code = (err && err.status) ? Number(err.status) : 500;
@@ -2773,7 +2815,25 @@ function connectDriveBackupFromSheet_() {
   var ss = requireSheetContext_();
   var cfg = loadDriveConfig_();
   /* دسترسی اولیه به درایو تا پنجره صدور مجوز گوگل فعال شود */
-  DriveApp.getRootFolder();
+  try {
+    DriveApp.getRootFolder();
+  } catch (authErr) {
+    var d = classifyDriveAuthError_(authErr);
+    try {
+      SpreadsheetApp.getUi().alert(
+        'نیاز به به‌روزرسانی مجوز در appsscript.json ⚠️\n\n' +
+        'گوگل به‌دلیل نبودن مجوز درایو در فایل appsscript.json پنجره‌ی تأیید را نمایش نداد.\n\n' +
+        'مراحل رفع در ۳۰ ثانیه:\n' +
+        '1) Extensions → Apps Script را باز کنید.\n' +
+        '2) از منوی چپ Project Settings (⚙️) تیک Show "appsscript.json" manifest file in editor را بزنید.\n' +
+        '3) فایل appsscript.json را با نسخه جدید (شامل https://www.googleapis.com/auth/drive و script.scriptapp) جایگزین و ذخیره کنید.\n' +
+        '4) در بالای ادیتور تابع connectDriveBackupFromSheet را انتخاب کرده و Run بزنید تا پنجره تأیید گوگل باز شود.\n' +
+        '5) در پایان از Deploy → Manage deployments نسخه جدید ثبت کنید.\n\n' +
+        'خطای دقیق گوگل: ' + d.authError
+      );
+    } catch (ignored) {}
+    throw authErr;
+  }
   var folder = resolveDriveFolder_(cfg, cfg.folderId, cfg.folderName || QC_GAS_DRIVE_DEFAULT_FOLDER);
   cfg.connected = true;
   cfg.folderId = String(folder.getId());

@@ -60,6 +60,7 @@ const QCAuth = {
   clear() {
     if (window.UI && window.UI.api.clearCache) window.UI.api.clearCache(true);
     if (window.QCLocalSync && typeof window.QCLocalSync.reset === 'function') window.QCLocalSync.reset();
+    if (window.QCProtect && typeof window.QCProtect.clear === 'function') window.QCProtect.clear();
     this.user = null; this.token = ''; this._bootstrap = null; safeRemove(TOKEN_KEY);
   },
 

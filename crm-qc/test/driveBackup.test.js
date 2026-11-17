@@ -419,3 +419,107 @@ test('Data Center UI connects Drive, opens interactive Backup Inspector modal, a
     assert.ok(finalStatus.backups.some(b => b.trigger === 'pre-restore'), 'pre-restore safety backup must be saved');
   } finally { dom.window.close(); }
 });
+
+test('Drive OAuth diagnosis detects missing appsscript.json scope and exposes direct authorizationUrl in UI', async () => {
+  const srv = createDriveServer();
+  srv.ctx.ScriptApp.AuthMode = { FULL: 'FULL' };
+  srv.ctx.ScriptApp.getAuthorizationInfo = () => ({
+    getAuthorizationStatus: () => 'REQUIRED',
+    getAuthorizationUrl: () => 'https://script.google.com/macros/authorize?test=drive'
+  });
+  srv.drive.checkAuth = () => {
+    throw new Error('Specified permissions are not sufficient to call DriveApp.getRootFolder. Required permissions: https://www.googleapis.com/auth/drive');
+  };
+
+  /* حتی پیش از کلیک روی دکمه اتصال، GET /api/drive-backups مشکل appsscript.json و لینک تأیید را گزارش می‌دهد */
+  const st = srv.ctx.crmqcApi('GET', '/api/drive-backups', {}, srv.adminToken);
+  assert.equal(st.status, 200);
+  assert.equal(st.data.needsAuthorization, true);
+  assert.equal(st.data.needsManifestScope, true);
+  assert.equal(st.data.authorizationUrl, 'https://script.google.com/macros/authorize?test=drive');
+
+  const { dom, w } = browser('public', undefined, async (url, opts = {}) => {
+    const method = String(opts.method || 'GET').toUpperCase();
+    const body = opts.body ? JSON.parse(opts.body) : {};
+    const packet = srv.ctx.crmqcApi(method, url, body, srv.adminToken);
+    return {
+      ok: packet.status >= 200 && packet.status < 300,
+      status: packet.status,
+      revision: packet.revision || '',
+      headers: { get: k => String(k).toLowerCase() === 'x-qc-revision' ? (packet.revision || null) : null },
+      json: async () => packet.data
+    };
+  });
+  try {
+    w.APP_SCRIPT_MODE = true;
+    w.sessionStorage.setItem('crmqc.auth.v1', JSON.stringify({ token: srv.adminToken, user: srv.adminUser }));
+    w.QCAuth.token = srv.adminToken;
+    w.QCAuth.user = srv.adminUser;
+    w.QCAuth.required = true;
+    await w.App.boot();
+    w.location.hash = '#/data';
+    await w.App.route();
+    await new Promise(r => setTimeout(r, 150));
+
+    assert.ok(w.document.querySelector('#drvManifestCode'), 'copyable appsscript.json box must appear');
+    assert.ok(w.document.querySelector('a[href="https://script.google.com/macros/authorize?test=drive"]'), 'direct OAuth approval link must appear');
+  } finally { dom.window.close(); }
+});
+
+test('Protected Apps Script Index.html locks stolen offline copies, strips seed/comments, blocks inspect shortcuts, and renders user watermark', async () => {
+  const { JSDOM, VirtualConsole } = require('jsdom');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'apps-script-full', 'Index.html'), 'utf8')
+    .split('__QC_APP_SCRIPT_URL__').join('https://script.google.com/macros/s/demo/exec')
+    .split('__QC_INITIAL_ROUTE_VALUE__').join('');
+
+  /* ۱) کپی ذخیره‌شده بدون google.script.run باید فوراً قفل شود و صفحه غیرمجاز نشان دهد */
+  assert.ok(html.includes('window.QC_SEED=null;'), 'seed-data must be stripped from protected Index.html');
+  assert.ok(!html.includes('/* storage.js */'), 'non-essential source file banners must be stripped');
+  const stolenDom = new JSDOM(html, {
+    url: 'file:///stolen-copy/Index.html', runScripts: 'dangerously', pretendToBeVisual: true,
+    virtualConsole: new VirtualConsole(),
+    beforeParse(w) { w.scrollTo = () => {}; }
+  });
+  try {
+    await new Promise(r => setTimeout(r, 80));
+    assert.equal(stolenDom.window.__QC_LOCKED_OUT__, true, 'stolen copy outside Google Apps Script must lock out');
+    assert.match(stolenDom.window.document.body.textContent, /اجرای غیرمجاز/);
+  } finally { stolenDom.window.close(); }
+
+  /* ۲) محافظت در زمان اجرا: مسدودسازی کلیدهای مشاهده سورس/ذخیره، کلیک راست غیرمتنی، واترمارک کاربر و قفل LocalApi.backup برای غیرادمین */
+  const { dom, w } = browser('public');
+  try {
+    w.APP_SCRIPT_MODE = true;
+    w.QCAuth.user = { name: 'سارا محمدی', role: 'qc' };
+    w.QCProtect.apply({ orgName: 'تیم کنترل کیفیت', protection: { blockInspect: true, watermark: true, watermarkText: 'محرمانه' } }, w.QCAuth.user);
+
+    const wm = w.document.querySelector('#qcWatermarkLayer');
+    assert.ok(wm, 'user watermark layer must be rendered');
+    assert.match(wm.textContent, /سارا محمدی/);
+    assert.match(wm.textContent, /محرمانه/);
+
+    /* Ctrl+U و F12 باید preventDefault شوند */
+    const evU = new w.KeyboardEvent('keydown', { key: 'u', ctrlKey: true, cancelable: true, bubbles: true });
+    w.document.dispatchEvent(evU);
+    assert.equal(evU.defaultPrevented, true, 'Ctrl+U must be blocked');
+
+    const evF12 = new w.KeyboardEvent('keydown', { key: 'F12', cancelable: true, bubbles: true });
+    w.document.dispatchEvent(evF12);
+    assert.equal(evF12.defaultPrevented, true, 'F12 must be blocked');
+
+    /* کلیک راست روی body مسدود، اما روی input آزاد است */
+    const ctxBody = new w.MouseEvent('contextmenu', { cancelable: true, bubbles: true });
+    w.document.body.dispatchEvent(ctxBody);
+    assert.equal(ctxBody.defaultPrevented, true, 'right-click on chrome must be blocked');
+
+    const inp = w.document.createElement('input');
+    w.document.body.appendChild(inp);
+    const ctxInp = new w.MouseEvent('contextmenu', { cancelable: true, bubbles: true });
+    inp.dispatchEvent(ctxInp);
+    assert.equal(ctxInp.defaultPrevented, false, 'right-click inside input must remain usable');
+
+    /* کاربر غیرادمین نتواند از کنسول LocalApi.backup() بگیرد */
+    assert.throws(() => w.LocalApi.backup(), /غیرمجاز/);
+  } finally { dom.window.close(); }
+});
+

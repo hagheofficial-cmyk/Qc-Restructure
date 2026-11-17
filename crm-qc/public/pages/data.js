@@ -1318,22 +1318,59 @@ async function render(root) {
     }
 
     if (st.needsAuthorization) {
+      const manifestSnippet = JSON.stringify({
+        timeZone: 'Asia/Tehran',
+        dependencies: {},
+        exceptionLogging: 'STACKDRIVER',
+        runtimeVersion: 'V8',
+        webapp: { executeAs: 'USER_DEPLOYING', access: 'ANYONE_ANONYMOUS' },
+        oauthScopes: [
+          'https://www.googleapis.com/auth/spreadsheets.currentonly',
+          'https://www.googleapis.com/auth/script.container.ui',
+          'https://www.googleapis.com/auth/drive',
+          'https://www.googleapis.com/auth/script.scriptapp'
+        ]
+      }, null, 2);
       badge.className = 'badge warn';
-      badge.textContent = 'نیاز به تأیید دسترسی درایو';
+      badge.textContent = st.needsManifestScope ? 'مجوز درایو در appsscript.json کم است' : 'نیاز به تأیید دسترسی درایو';
       body.innerHTML = `
         <div class="drv-auth-box">
-          <h4><i class="fa-solid fa-key"></i> درخواست مجوز دسترسی به گوگل درایو</h4>
-          <div style="font-size:12.5px;color:var(--ink-2)">برای اینکه سامانه بتواند پوشه بکاپ بسازد و به‌صورت خودکار روی گوگل درایو پشتیبان‌گیری کند، مالک گوگل شیت باید یک‌بار مجوز درایو را تأیید کند:</div>
+          <h4><i class="fa-solid fa-key"></i> ${st.needsManifestScope ? 'چرا پنجره تأیید روی شیت باز نشد؟ (مجوز درایو در appsscript.json ثبت نشده)' : 'درخواست مجوز دسترسی به گوگل درایو'}</h4>
+          <div style="font-size:12.5px;color:var(--ink-2)">
+            ${st.needsManifestScope
+              ? 'در پروژه Apps Script شما هنوز مجوز <b>Google Drive</b> به فایل <code>appsscript.json</code> اضافه نشده است؛ تا زمانی که این فایل به‌روز نشود گوگل هیچ پنجره‌ی تأییدی روی شیت نمایش نمی‌دهد.'
+              : 'وب‌اپ به‌تنهایی نمی‌تواند روی تب شیت پنجره باز کند؛ مالک شیت باید یک‌بار از طریق دکمه تأیید زیر یا منوی شیت/ادیتور Apps Script دسترسی گوگل درایو را تأیید کند.'}
+          </div>
+          ${st.authorizationUrl ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a class="btn primary" href="${esc(st.authorizationUrl)}" target="_blank" rel="noopener"><i class="fa-solid fa-arrow-up-right-from-square"></i> باز کردن پنجره رسمی تأیید گوگل درایو (۱ کلیک)</a>
+          </div>` : ''}
           <ol class="drv-auth-steps">
-            <li>فایل <b>گوگل شیت</b> اصلی سامانه را باز کنید.</li>
-            <li>از منوی بالای شیت روی <b>«سامانه QC مستقل ← اتصال و صدور مجوز گوگل درایو (بکاپ خودکار)»</b> کلیک کنید.</li>
-            <li>در پنجره‌ی مجوز گوگل، دسترسی به گوگل درایو را تأیید (<b>Allow</b>) کنید و سپس دکمه‌ی زیر را بزنید.</li>
+            <li>در گوگل شیت به مسیر <b>Extensions ← Apps Script</b> بروید و از <b>Project Settings (⚙️)</b> تیک <code>Show "appsscript.json" manifest file in editor</code> را بزنید.</li>
+            <li>فایل <code>appsscript.json</code> را باز کرده، متن زیر را جایگزین و ذخیره (<code>Ctrl+S</code>) کنید (اگر روی دسترسی سازمانی هستید، <code>access</code> را طبق تنظیم خودتان نگه دارید).</li>
+            <li>از نوار بالای ادیتور Apps Script، تابع <b><code>connectDriveBackupFromSheet</code></b> را انتخاب کرده و روی <b>Run</b> کلیک کنید (یا صفحه گوگل شیت را <b>F5</b> رفرش کنید و منوی <b>سامانه QC مستقل ← اتصال و صدور مجوز گوگل درایو</b> را بزنید) ← پنجره رسمی <b>Review Permissions / Allow</b> گوگل همان لحظه باز می‌شود.</li>
+            <li>در پایان از <b>Deploy ← Manage deployments ← Edit (✏️) ← New version</b> نسخه جدید را منتشر کنید و سپس دکمه <b>«بررسی مجدد اتصال»</b> زیر را بزنید.</li>
           </ol>
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+            <span style="font-size:11.5px;font-weight:700;color:var(--ink-2)">محتوای آماده فایل <code>appsscript.json</code>:</span>
+            <button type="button" class="btn soft sm" id="drvCopyManifestBtn"><i class="fa-regular fa-copy"></i> کپی appsscript.json</button>
+          </div>
+          <pre class="drv-code-box" id="drvManifestCode">${esc(manifestSnippet)}</pre>
+          ${st.authError ? `<div style="font-size:11.5px;color:var(--muted)" dir="ltr">Google message: ${esc(st.authError)}</div>` : ''}
           <div style="display:flex;gap:8px;flex-wrap:wrap">
             <button class="btn primary" id="drvRecheckBtn"><i class="fa-solid fa-rotate"></i> بررسی مجدد اتصال</button>
           </div>
         </div>
       `;
+      $('#drvCopyManifestBtn', body).addEventListener('click', async () => {
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(manifestSnippet);
+          else {
+            const ta = document.createElement('textarea');
+            ta.value = manifestSnippet; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+          }
+          toast.success('محتوای appsscript.json کپی شد');
+        } catch (e) { toast.info('متن کادر بالا را انتخاب و کپی کنید'); }
+      });
       $('#drvRecheckBtn', body).addEventListener('click', () => loadDriveBackups(true));
       return;
     }

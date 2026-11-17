@@ -1247,6 +1247,9 @@ const App = {
     this.initDateRange();
     this.renderUserChip();
     if (window.QCAuth) window.QCAuth.applyNav();
+    if (window.QCProtect && typeof window.QCProtect.apply === 'function') {
+      window.QCProtect.apply(st.settings, window.QCAuth ? window.QCAuth.user : this.auth.user);
+    }
     if (!api.offline && window.QCLocalSync && window.QCLocalSync.isActive()) {
       window.QCLocalSync.setRawRequest((m, u, b) => api._request(m, u, b));
       window.QCLocalSync.hydrate(false);

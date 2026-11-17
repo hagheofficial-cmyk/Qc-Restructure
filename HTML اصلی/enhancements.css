@@ -814,5 +814,21 @@ table.profile-call-table { width:100%; min-width:0; table-layout:fixed; font-siz
 .drv-restore-opt { display:flex; gap:10px; align-items:flex-start; padding:11px 13px; border-radius:11px; border:1px solid var(--line); background:var(--soft); cursor:pointer; }
 .drv-restore-opt input { margin-top:3px; }
 .drv-restore-opt:has(input:checked) { border-color:var(--brand); background:var(--brand-soft); }
+.drv-code-box { direction:ltr; text-align:left; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; line-height:1.5; padding:10px 12px; border-radius:10px; background:var(--panel); border:1px solid var(--line); overflow:auto; margin:0; white-space:pre; color:var(--ink); }
+
+/* ===== حفاظت از کد، واترمارک نشست و پنل امنیت ===== */
+.qc-watermark-layer { position:fixed; inset:0; z-index:9998; pointer-events:none; user-select:none; overflow:hidden; display:grid; grid-template-columns:repeat(2,1fr); grid-template-rows:repeat(3,1fr); align-items:center; justify-items:center; }
+.qc-watermark-item { font-size:13px; font-weight:700; color:var(--ink); opacity:.045; transform:rotate(-24deg); white-space:nowrap; letter-spacing:.2px; }
+[data-theme="light"] .qc-watermark-item { opacity:.055; }
+.qc-protected-ui .sidebar, .qc-protected-ui .topbar, .qc-protected-ui .page-head { user-select:none; }
+.qc-sec-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px; }
+.qc-sec-pill { display:flex; align-items:flex-start; gap:10px; padding:11px 13px; border-radius:11px; background:var(--soft); border:1px solid var(--line); }
+.qc-sec-pill i { margin-top:2px; font-size:15px; }
+.qc-sec-pill.ok i { color:var(--good); }
+.qc-sec-pill.warn i { color:var(--warn); }
+.qc-sec-toggle { display:flex; align-items:flex-start; gap:10px; padding:11px 13px; border-radius:11px; background:var(--soft); border:1px solid var(--line); cursor:pointer; }
+.qc-sec-toggle input { margin-top:3px; }
+.qc-sec-checklist { margin:0; padding-inline-start:20px; display:flex; flex-direction:column; gap:6px; font-size:12.6px; color:var(--ink-2); line-height:1.75; }
+
 
 
