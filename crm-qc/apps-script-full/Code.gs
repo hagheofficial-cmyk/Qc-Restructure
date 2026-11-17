@@ -3619,7 +3619,7 @@ const SHARED_ROUTES = ['dashboard', 'tickets', 'tickets-new', 'socials', 'social
 
 /* اندپوینت‌هایی که همیشه مخصوص مدیرند (بدون توجه به نقش درخواست‌کننده). */
 const ADMIN_API = ['/api/criteria', '/api/settings', '/api/qc-users', '/api/fiscal-months', '/api/elements',
-  '/api/backup', '/api/demo', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
+  '/api/backup', '/api/drive-backups', '/api/demo', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
   '/api/action-types', '/api/agents'];
 
 /* خواندن‌هایی که برای صفحه‌های عملیاتیِ کارشناس QC لازم‌اند (با داده‌ی محدودشده)؛
@@ -4992,6 +4992,12 @@ function dispatch(method, url, body) {
     X.ensure(db);
     saveDb(); return clone(result);
   }
+  if (name === 'drive-backups') {
+    if (method === 'GET') {
+      return { supported: false, provider: 'offline', connected: false, needsAuthorization: false, config: {}, backups: [] };
+    }
+    bad('اتصال مستقیم به گوگل درایو فقط در نسخه Apps Script یا سرور فعال است.', 400);
+  }
   if (name === 'monthly-scores') {
     if (!Array.isArray(db.monthlyScores)) db.monthlyScores = [];
     if (id == null && method === 'GET') {
@@ -5542,6 +5548,11 @@ var QC_GAS_TOKEN_TTL_SEC = 21600; // ۶ ساعت؛ با هر درخواست تم
 /* کش یکتاپذیری عملیات نوشتن (Idempotency): جلوگیری از ثبت تکراری در صورت تلاش مجدد شبکه */
 var QC_GAS_OP_PREFIX = 'qcop@';
 var QC_GAS_OP_TTL_SEC = 600;
+/* بکاپ خودکار و مشاهده/بازگردانی روی گوگل درایو */
+var QC_GAS_DRIVE_CFG_KEY = 'QC_GAS_DRIVE_CFG';
+var QC_GAS_DRIVE_TRIGGER_UID_KEY = 'QC_GAS_DRIVE_TRIGGER_UID';
+var QC_GAS_DRIVE_HANDLER = 'crmqcScheduledDriveBackup';
+var QC_GAS_DRIVE_DEFAULT_FOLDER = 'پشتیبان‌گیری سامانه QC';
 /* آیکون سربرگ مرورگر (favicon). به‌صورت پیش‌فرض روی لوگوی رسمی سامانه تنظیم است؛
  * برای لوگوی اختصاصی دیگر می‌توانید کلید QC_GAS_FAVICON_URL را در Script Properties قرار دهید. */
 var QC_GAS_FAVICON_KEY = 'QC_GAS_FAVICON_URL';
@@ -5554,6 +5565,8 @@ function onOpen() {
       .addItem('راه‌اندازی / بررسی تب‌های سامانه', 'setupStandaloneApp')
       .addItem('ساخت اولین مدیر امن', 'createFirstAdminFromSheet')
       .addItem('تغییر رمز مدیر از شیت', 'resetAdminFromSheet')
+      .addSeparator()
+      .addItem('اتصال و صدور مجوز گوگل درایو (بکاپ خودکار)', 'connectDriveBackupFromSheet')
       .addSeparator()
       .addItem('خواندن تازه از شیت (پاک‌کردن کش)', 'refreshFromSheet')
       .addItem('بازسازی تب خلاصه ماهانه', 'rebuildMonthlySummary')
@@ -5582,6 +5595,8 @@ function refreshFromSheet() { requireSheetContext_(); return refreshFromSheet_()
 function rebuildMonthlySummary() { requireSheetContext_(); return rebuildMonthlySummary_(); }
 function clearSessions() { requireSheetContext_(); return clearSessions_(); }
 function crmqcOnSheetChange() { requireSheetContext_(); return crmqcOnSheetChange_(); }
+function connectDriveBackupFromSheet() { requireSheetContext_(); return connectDriveBackupFromSheet_(); }
+function crmqcScheduledDriveBackup(e) { return crmqcScheduledDriveBackup_(e); }
 
 /**
  * Run once from the bound spreadsheet's Apps Script editor.
@@ -5795,6 +5810,18 @@ function crmqcApi(method, requestUrl, body, token) {
      * چند تغییر پشت‌سرهم زیر یک قفل، یک خواندن و یک نوشتن دیف روی شیت ثبت می‌شوند. */
     if (!isRead && pathOnly === '/api/batch-sync') {
       return executeBatchSync_(getSs_, token, body, revision);
+    }
+
+    /* مسیرهای اتصال، زمان‌بندی، مشاهده و بازگردانی بکاپ روی گوگل درایو (فقط مدیر) */
+    if (pathOnly === '/api/drive-backups' || pathOnly.indexOf('/api/drive-backups/') === 0) {
+      var driveRawSess = resolveSession_(token);
+      if (!driveRawSess) return { status: 401, data: { error: 'برای این کار باید وارد سامانه شوید.' } };
+      var driveAuthDb = normalizeDatabase_(readDatabase_(getSs_, ['qcUsers', 'settings'], { publish: true }));
+      driveAuthDb.settings.authMode = 'on';
+      var driveSession = refreshSession_(driveRawSess, driveAuthDb);
+      if (!driveSession) return { status: 401, data: { error: 'برای این کار باید وارد سامانه شوید.' } };
+      if (driveSession.role !== 'admin') return { status: 403, data: { error: 'این بخش فقط برای مدیر سیستم باز است.' } };
+      return handleDriveBackupApi_(method, pathOnly, getSs_, body, driveSession, revision);
     }
 
     /* مسیر سریع کش تحلیل برای GET: پیش از بارگذاری تب‌های سنگین و بدون openById،
@@ -6051,7 +6078,8 @@ function executeBatchSync_(getSs_, token, body, revision) {
     var cb = chk.body && typeof chk.body === 'object' ? chk.body : {};
     if (cm === 'GET' || cp.indexOf('/api/') !== 0 || cp.indexOf('/api/auth/') === 0 ||
         cp === '/api/session-snapshot' || cp.indexOf('/api/session-snapshot/') === 0 ||
-        cp === '/api/batch-sync' || cp === '/api/local-sync') {
+        cp === '/api/batch-sync' || cp === '/api/local-sync' ||
+        cp === '/api/drive-backups' || cp.indexOf('/api/drive-backups/') === 0) {
       return { status: 403, data: { error: 'مسیر مجاز برای همگام‌سازی دسته‌ای نیست: ' + cp } };
     }
     if ((cp === '/api/settings' || cp.indexOf('/api/settings/') === 0) && cb.authMode && cb.authMode !== 'on') {
@@ -6434,27 +6462,32 @@ function getCallReportSettings(token) {
   return readCallReportSettings_();
 }
 
+function writeCallReportSetting_(ss, key, jsonValue) {
+  var sheetName = QC_GAS_CALL_REPORT_KEYS[String(key || '')];
+  if (!sheetName) throw new Error('کلید تنظیمات گزارش تماس مجاز نیست.');
+  var text = String(jsonValue == null ? '' : jsonValue);
+  if (text) JSON.parse(text);
+  markSelfWrite_();
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return;
+  var values = text ? [['json'], [text]] : [['json']];
+  if (sheet.getLastRow() === values.length) {
+    sheet.getRange(1, 1, values.length, 1).setValues(values);
+  } else {
+    sheet.clearContents();
+    sheet.getRange(1, 1, values.length, 1).setValues(values);
+    styleHeader_(sheet, 1);
+  }
+}
+
 /** Persist the two legacy call-report configuration lists in their own tabs. */
 function saveCallReportSetting(key, jsonValue, token) {
   requireReportAdmin_(token);
-  var sheetName = QC_GAS_CALL_REPORT_KEYS[String(key || '')];
-  if (!sheetName) throw new Error('کلید تنظیمات گزارش تماس مجاز نیست.');
+  if (!QC_GAS_CALL_REPORT_KEYS[String(key || '')]) throw new Error('کلید تنظیمات گزارش تماس مجاز نیست.');
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    var ss = getDatabaseSpreadsheet_();
-    var text = String(jsonValue == null ? '' : jsonValue);
-    if (text) JSON.parse(text); // reject malformed JSON rather than corrupt the settings tab
-    markSelfWrite_();
-    var sheet = ss.getSheetByName(sheetName);
-    var values = text ? [['json'], [text]] : [['json']];
-    if (sheet.getLastRow() === values.length) {
-      sheet.getRange(1, 1, values.length, 1).setValues(values);
-    } else {
-      sheet.clearContents();
-      sheet.getRange(1, 1, values.length, 1).setValues(values);
-      styleHeader_(sheet, 1);
-    }
+    writeCallReportSetting_(getDatabaseSpreadsheet_(), key, jsonValue);
     return { ok: true };
   } finally {
     lock.releaseLock();
@@ -7576,3 +7609,661 @@ function jsonSafe_(value) {
   if (value === undefined) return null;
   return JSON.parse(JSON.stringify(value));
 }
+
+/* =========================================================================
+ * بکاپ خودکار، مشاهده، مقایسه و بازگردانی روی گوگل درایو
+ * ========================================================================= */
+
+function defaultDriveConfig_() {
+  return {
+    connected: false,
+    folderId: '',
+    folderName: QC_GAS_DRIVE_DEFAULT_FOLDER,
+    folderUrl: '',
+    schedule: 'daily',
+    hour: 2,
+    dayOfWeek: 5,
+    maxKeep: 30,
+    lastBackupAt: '',
+    lastBackupId: '',
+    lastBackupName: '',
+    lastTrigger: '',
+    lastError: ''
+  };
+}
+
+function loadDriveConfig_() {
+  var base = defaultDriveConfig_();
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty(QC_GAS_DRIVE_CFG_KEY);
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') Object.assign(base, parsed);
+    }
+  } catch (err) {}
+  return base;
+}
+
+function saveDriveConfig_(cfg) {
+  var clean = Object.assign(defaultDriveConfig_(), cfg || {});
+  clean.hour = Math.max(0, Math.min(23, Number(clean.hour) || 0));
+  clean.dayOfWeek = Math.max(1, Math.min(7, Number(clean.dayOfWeek) || 5));
+  clean.maxKeep = Math.max(5, Math.min(200, Number(clean.maxKeep) || 30));
+  if (['off', '6h', '12h', 'daily', 'weekly'].indexOf(clean.schedule) === -1) clean.schedule = 'daily';
+  PropertiesService.getScriptProperties().setProperty(QC_GAS_DRIVE_CFG_KEY, JSON.stringify(clean));
+  return clean;
+}
+
+function isDriveAuthError_(err) {
+  var msg = String((err && err.message) || err || '');
+  return /permission|authorize|authorization|oauth|driveapp|scriptapp|مجوز|دسترسی.*درایو|Specified permissions/i.test(msg);
+}
+
+function extractDriveFolderId_(input) {
+  var s = String(input || '').trim();
+  if (!s) return '';
+  var m = s.match(/\/folders\/([a-zA-Z0-9_-]{10,})/);
+  if (m) return m[1];
+  m = s.match(/[?&]id=([a-zA-Z0-9_-]{10,})/);
+  if (m) return m[1];
+  if (/^[a-zA-Z0-9_-]{15,}$/.test(s)) return s;
+  return '';
+}
+
+function resolveDriveFolder_(cfg, folderInput, folderName) {
+  if (typeof DriveApp === 'undefined' || !DriveApp) {
+    throw new Error('You do not have permission to call DriveApp');
+  }
+  var wantedId = extractDriveFolderId_(folderInput);
+  if (wantedId) {
+    var explicit = DriveApp.getFolderById(wantedId);
+    if (!explicit || (typeof explicit.isTrashed === 'function' && explicit.isTrashed())) {
+      throw new Error('پوشه مشخص‌شده در گوگل درایو یافت نشد یا حذف شده است.');
+    }
+    return explicit;
+  }
+  if (!folderName && cfg && cfg.folderId) {
+    try {
+      var existing = DriveApp.getFolderById(cfg.folderId);
+      if (existing && (typeof existing.isTrashed !== 'function' || !existing.isTrashed())) return existing;
+    } catch (ignored) {}
+  }
+  var name = String(folderName || (cfg && cfg.folderName) || QC_GAS_DRIVE_DEFAULT_FOLDER).trim() || QC_GAS_DRIVE_DEFAULT_FOLDER;
+  if (typeof DriveApp.getFoldersByName === 'function') {
+    var iter = DriveApp.getFoldersByName(name);
+    while (iter && iter.hasNext()) {
+      var cand = iter.next();
+      if (typeof cand.isTrashed !== 'function' || !cand.isTrashed()) return cand;
+    }
+  }
+  return DriveApp.createFolder(name);
+}
+
+function fileInBackupFolder_(file, folderId) {
+  if (!file || !folderId) return false;
+  if (typeof file.isTrashed === 'function' && file.isTrashed()) return false;
+  if (typeof file.getParents === 'function') {
+    var parents = file.getParents();
+    while (parents && parents.hasNext()) {
+      var p = parents.next();
+      if (p && String(p.getId()) === String(folderId)) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+function removeDriveTriggers_() {
+  try {
+    var list = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].getHandlerFunction && list[i].getHandlerFunction() === QC_GAS_DRIVE_HANDLER) {
+        ScriptApp.deleteTrigger(list[i]);
+      }
+    }
+  } catch (err) {}
+  PropertiesService.getScriptProperties().setProperty(QC_GAS_DRIVE_TRIGGER_UID_KEY, '');
+}
+
+function hasActiveDriveTrigger_() {
+  try {
+    var list = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].getHandlerFunction && list[i].getHandlerFunction() === QC_GAS_DRIVE_HANDLER) return true;
+    }
+  } catch (err) {}
+  return false;
+}
+
+function driveWeekDayEnum_(dayNum) {
+  var wd = (typeof ScriptApp !== 'undefined' && ScriptApp.WeekDay) ? ScriptApp.WeekDay : null;
+  if (!wd) return dayNum;
+  var map = [null, wd.MONDAY, wd.TUESDAY, wd.WEDNESDAY, wd.THURSDAY, wd.FRIDAY, wd.SATURDAY, wd.SUNDAY];
+  return map[dayNum] || wd.FRIDAY;
+}
+
+function syncDriveTrigger_(cfg) {
+  removeDriveTriggers_();
+  if (!cfg || !cfg.connected || cfg.schedule === 'off') return false;
+  var builder = ScriptApp.newTrigger(QC_GAS_DRIVE_HANDLER).timeBased();
+  if (cfg.schedule === '6h') builder = builder.everyHours(6);
+  else if (cfg.schedule === '12h') builder = builder.everyHours(12);
+  else if (cfg.schedule === 'weekly') builder = builder.everyWeeks(1).onWeekDay(driveWeekDayEnum_(cfg.dayOfWeek)).atHour(cfg.hour);
+  else builder = builder.everyDays(1).atHour(cfg.hour);
+  var trigger = builder.create();
+  var uid = (trigger && typeof trigger.getUniqueId === 'function') ? String(trigger.getUniqueId() || '') : '';
+  if (!uid) uid = 'drv-' + Utilities.getUuid();
+  PropertiesService.getScriptProperties().setProperty(QC_GAS_DRIVE_TRIGGER_UID_KEY, uid);
+  return true;
+}
+
+function buildFullBackupObject_(db) {
+  var callReportStorage = {};
+  try { callReportStorage = readCallReportSettings_(); } catch (ignored) {}
+  return {
+    schema: 'crm-qc-backup',
+    version: 4,
+    datasetId: db.datasetId || '',
+    exportedAt: new Date().toISOString(),
+    range: { from: null, to: null },
+    settings: db.settings || {},
+    lists: db.lists || {},
+    agents: db.agents || [],
+    qcAgents: db.qcAgents || [],
+    qcUsers: db.qcUsers || [],
+    fiscalMonths: db.fiscalMonths || [],
+    elements: db.elements || [],
+    agentActions: db.agentActions || {},
+    actionTypes: window.QCExpertRef ? window.QCExpertRef.actionTypes(db) : (db.actionTypes || []),
+    reminders: window.QCExpertRef ? window.QCExpertRef.reminderList(db) : (db.reminders || []),
+    tickets: db.tickets || [],
+    socials: db.socials || [],
+    callFeedbacks: db.callFeedbacks || [],
+    callSituational: db.callSituational || [],
+    monthlyScores: db.monthlyScores || [],
+    callImport: db.callImport || null,
+    callReportStorage: callReportStorage
+  };
+}
+
+function countActionsInMap_(map) {
+  var total = 0;
+  if (!map || typeof map !== 'object') return 0;
+  var keys = Object.keys(map);
+  for (var i = 0; i < keys.length; i++) {
+    if (Array.isArray(map[keys[i]])) total += map[keys[i]].length;
+  }
+  return total;
+}
+
+function backupCountsOf_(obj) {
+  obj = obj || {};
+  return {
+    agents: Array.isArray(obj.agents) ? obj.agents.length : 0,
+    tickets: Array.isArray(obj.tickets) ? obj.tickets.length : 0,
+    socials: Array.isArray(obj.socials) ? obj.socials.length : 0,
+    calls: Array.isArray(obj.callFeedbacks) ? obj.callFeedbacks.length : 0,
+    callSituational: Array.isArray(obj.callSituational) ? obj.callSituational.length : 0,
+    monthlyScores: Array.isArray(obj.monthlyScores) ? obj.monthlyScores.length : 0,
+    actions: countActionsInMap_(obj.agentActions),
+    reminders: Array.isArray(obj.reminders) ? obj.reminders.length : 0,
+    fiscalMonths: Array.isArray(obj.fiscalMonths) ? obj.fiscalMonths.length : 0,
+    qcUsers: Array.isArray(obj.qcUsers) ? obj.qcUsers.length : 0
+  };
+}
+
+function backupPeriodOf_(obj) {
+  var minD = '', maxD = '';
+  var check = function (d) {
+    var s = String(d || '').trim();
+    if (!/^\d{4}\/\d{2}\/\d{2}$/.test(s)) return;
+    if (!minD || s < minD) minD = s;
+    if (!maxD || s > maxD) maxD = s;
+  };
+  (obj.tickets || []).forEach(function (r) { check(r && r.reviewDate); });
+  (obj.socials || []).forEach(function (r) { check(r && r.reviewDate); });
+  (obj.callFeedbacks || []).forEach(function (r) { check(r && r.reviewDate); });
+  (obj.callSituational || []).forEach(function (r) { check(r && r.periodFrom); check(r && r.periodTo); });
+  (obj.monthlyScores || []).forEach(function (r) { check(r && r.periodFrom); check(r && r.periodTo); });
+  return { from: minD || null, to: maxD || null };
+}
+
+function backupFilename_(trigger) {
+  var now = new Date();
+  var j = window.QCCalc && window.QCCalc.todayJalali ? window.QCCalc.todayJalali() : null;
+  var datePart = j
+    ? (j.jy + '-' + ('0' + j.jm).slice(-2) + '-' + ('0' + j.jd).slice(-2))
+    : now.toISOString().slice(0, 10);
+  var timePart = String(Utilities.formatDate(now, Session.getScriptTimeZone() || 'Asia/Tehran', 'HH-mm-ss') || '')
+    .replace(/^.*T/, '').replace(/\..*$/, '').replace(/[^0-9-]/g, '-');
+  var tag = String(trigger || 'manual').replace(/[^a-z0-9_-]/gi, '') || 'manual';
+  return 'qc-backup-' + datePart + '_' + timePart + '-' + tag + '.json';
+}
+
+function formatDriveFileEntry_(file) {
+  var desc = {};
+  try {
+    var rawDesc = typeof file.getDescription === 'function' ? file.getDescription() : '';
+    if (rawDesc && rawDesc.charAt(0) === '{') desc = JSON.parse(rawDesc) || {};
+  } catch (ignored) {}
+  var id = String(file.getId());
+  var created = typeof file.getDateCreated === 'function' ? file.getDateCreated() : new Date();
+  var createdIso = desc.createdAt || (created && created.toISOString ? created.toISOString() : String(created));
+  var url = typeof file.getUrl === 'function' ? file.getUrl() : ('https://drive.google.com/file/d/' + id + '/view');
+  return {
+    id: id,
+    name: String(file.getName() || ''),
+    createdAt: createdIso,
+    size: typeof file.getSize === 'function' ? Number(file.getSize()) || 0 : 0,
+    trigger: desc.trigger || 'manual',
+    note: desc.note || '',
+    version: desc.version || 4,
+    period: desc.period || { from: null, to: null },
+    counts: desc.counts || null,
+    url: url,
+    downloadUrl: 'https://drive.google.com/uc?export=download&id=' + encodeURIComponent(id)
+  };
+}
+
+function listDriveBackupFiles_(cfg) {
+  if (!cfg || !cfg.connected || !cfg.folderId) return [];
+  var folder = DriveApp.getFolderById(cfg.folderId);
+  if (!folder || (typeof folder.isTrashed === 'function' && folder.isTrashed())) return [];
+  var iter = folder.getFiles();
+  var items = [];
+  while (iter && iter.hasNext()) {
+    var file = iter.next();
+    if (typeof file.isTrashed === 'function' && file.isTrashed()) continue;
+    var name = String(file.getName() || '');
+    if (!/^qc-backup-.*\.json$/i.test(name)) continue;
+    items.push(formatDriveFileEntry_(file));
+  }
+  items.sort(function (a, b) { return String(b.createdAt).localeCompare(String(a.createdAt)); });
+  return items;
+}
+
+function pruneOldDriveBackups_(cfg) {
+  var maxKeep = Math.max(5, Math.min(200, Number(cfg && cfg.maxKeep) || 30));
+  var items = listDriveBackupFiles_(cfg);
+  if (items.length <= maxKeep) return 0;
+  var removed = 0;
+  for (var i = maxKeep; i < items.length; i++) {
+    try {
+      var f = DriveApp.getFileById(items[i].id);
+      if (fileInBackupFolder_(f, cfg.folderId)) {
+        f.setTrashed(true);
+        removed++;
+      }
+    } catch (ignored) {}
+  }
+  return removed;
+}
+
+function writeDriveBackupFile_(db, cfg, trigger, note) {
+  var folder = resolveDriveFolder_(cfg, cfg.folderId, cfg.folderName);
+  var payload = buildFullBackupObject_(db);
+  var counts = backupCountsOf_(payload);
+  var period = backupPeriodOf_(payload);
+  var fileName = backupFilename_(trigger);
+  var jsonStr = JSON.stringify(payload);
+  var file = folder.createFile(fileName, jsonStr, 'application/json');
+  var meta = {
+    schema: 'crm-qc-backup',
+    version: 4,
+    createdAt: payload.exportedAt,
+    trigger: trigger || 'manual',
+    note: String(note || '').trim().slice(0, 200),
+    counts: counts,
+    period: period
+  };
+  if (typeof file.setDescription === 'function') {
+    file.setDescription(JSON.stringify(meta));
+  }
+  cfg.folderId = String(folder.getId());
+  cfg.folderName = String(folder.getName() || cfg.folderName || QC_GAS_DRIVE_DEFAULT_FOLDER);
+  cfg.folderUrl = typeof folder.getUrl === 'function' ? folder.getUrl() : ('https://drive.google.com/drive/folders/' + cfg.folderId);
+  cfg.lastBackupAt = payload.exportedAt;
+  cfg.lastBackupId = String(file.getId());
+  cfg.lastBackupName = fileName;
+  cfg.lastTrigger = trigger || 'manual';
+  cfg.lastError = '';
+  saveDriveConfig_(cfg);
+  var pruned = pruneOldDriveBackups_(cfg);
+  var entry = formatDriveFileEntry_(file);
+  entry.counts = counts;
+  entry.period = period;
+  entry.trigger = meta.trigger;
+  entry.note = meta.note;
+  entry.size = entry.size || jsonStr.length;
+  return { backup: entry, pruned: pruned };
+}
+
+function driveStatusPayload_(cfg, includeList) {
+  var out = {
+    supported: true,
+    provider: 'google-drive',
+    connected: !!(cfg && cfg.connected && cfg.folderId),
+    needsAuthorization: false,
+    authError: '',
+    config: cfg,
+    triggerActive: hasActiveDriveTrigger_(),
+    backups: []
+  };
+  if (out.connected && includeList !== false) {
+    try {
+      out.backups = listDriveBackupFiles_(cfg);
+    } catch (err) {
+      if (isDriveAuthError_(err)) {
+        out.needsAuthorization = true;
+        out.authError = String(err.message || err);
+      } else {
+        out.config = Object.assign({}, cfg, { lastError: String(err.message || err) });
+      }
+    }
+  }
+  return out;
+}
+
+function buildBackupInspectPayload_(backupObj, item, liveDb) {
+  var counts = backupCountsOf_(backupObj);
+  var liveCounts = backupCountsOf_(liveDb);
+  var diff = {};
+  Object.keys(counts).forEach(function (k) {
+    diff[k] = { backup: counts[k], live: liveCounts[k] || 0, delta: counts[k] - (liveCounts[k] || 0) };
+  });
+  var flatActions = [];
+  var actMap = backupObj.agentActions || {};
+  Object.keys(actMap).forEach(function (agent) {
+    (actMap[agent] || []).forEach(function (a) {
+      flatActions.push(Object.assign({ agent: agent }, a));
+    });
+  });
+  flatActions.sort(function (a, b) { return String(b.date || '').localeCompare(String(a.date || '')); });
+
+  var cap = 400;
+  var tickets = (backupObj.tickets || []).slice().sort(function (a, b) { return Number(b.id || 0) - Number(a.id || 0); });
+  var socials = (backupObj.socials || []).slice().sort(function (a, b) { return Number(b.id || 0) - Number(a.id || 0); });
+  var calls = (backupObj.callFeedbacks || []).slice().sort(function (a, b) { return String(b.reviewDate || '').localeCompare(String(a.reviewDate || '')); });
+  var safeUsers = window.QCAccess && window.QCAccess.userMask
+    ? window.QCAccess.userMask(window.QCAccess.normalizeUsers({ qcUsers: backupObj.qcUsers || [] }))
+    : [];
+
+  return {
+    ok: true,
+    item: item,
+    exportedAt: backupObj.exportedAt || item.createdAt,
+    version: backupObj.version || 4,
+    period: backupPeriodOf_(backupObj),
+    counts: counts,
+    liveCounts: liveCounts,
+    diff: diff,
+    preview: {
+      agents: (backupObj.agents || []).slice(0, 500),
+      tickets: tickets.slice(0, cap),
+      socials: socials.slice(0, cap),
+      calls: calls.slice(0, cap),
+      callSituational: (backupObj.callSituational || []).slice(0, cap),
+      monthlyScores: (backupObj.monthlyScores || []).slice(0, cap),
+      actions: flatActions.slice(0, cap),
+      reminders: (backupObj.reminders || []).slice(0, cap),
+      fiscalMonths: backupObj.fiscalMonths || [],
+      qcUsers: safeUsers,
+      settings: {
+        orgName: backupObj.settings && backupObj.settings.orgName || '',
+        slaMinutes: backupObj.settings && backupObj.settings.slaMinutes,
+        ticketWeights: backupObj.settings && backupObj.settings.ticketWeights,
+        socialWeights: backupObj.settings && backupObj.settings.socialWeights
+      }
+    },
+    truncated: {
+      tickets: tickets.length > cap ? tickets.length - cap : 0,
+      socials: socials.length > cap ? socials.length - cap : 0,
+      calls: calls.length > cap ? calls.length - cap : 0,
+      actions: flatActions.length > cap ? flatActions.length - cap : 0
+    }
+  };
+}
+
+function readBackupFileVerified_(cfg, fileId) {
+  if (!cfg || !cfg.connected || !cfg.folderId) {
+    throw securityError_('ابتدا اتصال به گوگل درایو را برقرار کنید.', 400);
+  }
+  var cleanId = String(fileId || '').trim();
+  if (!cleanId) throw securityError_('شناسه فایل بکاپ نامعتبر است.', 400);
+  var file;
+  try { file = DriveApp.getFileById(cleanId); }
+  catch (err) { throw securityError_('فایل بکاپ در گوگل درایو یافت نشد.', 404); }
+  if (!fileInBackupFolder_(file, cfg.folderId)) {
+    throw securityError_('دسترسی به این فایل مجاز نیست؛ فایل در پوشه بکاپ سامانه قرار ندارد.', 403);
+  }
+  var raw = file.getBlob().getDataAsString('UTF-8');
+  var parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (err) { throw securityError_('ساختار فایل بکاپ JSON معتبر نیست.', 400); }
+  if (!parsed || parsed.schema !== 'crm-qc-backup') {
+    throw securityError_('این فایل یک بکاپ معتبر سامانه QC نیست.', 400);
+  }
+  return { file: file, item: formatDriveFileEntry_(file), backup: parsed };
+}
+
+function handleDriveBackupApi_(method, pathOnly, getSs_, body, session, revision) {
+  var cfg = loadDriveConfig_();
+  var sub = pathOnly.slice('/api/drive-backups'.length).replace(/^\/+/, '');
+  var segs = sub ? sub.split('/').map(function (s) { try { return decodeURIComponent(s); } catch (e) { return s; } }) : [];
+
+  try {
+    /* GET /api/drive-backups — وضعیت اتصال و لیست بکاپ‌ها */
+    if (method === 'GET' && !segs.length) {
+      return { status: 200, data: driveStatusPayload_(cfg, true), revision: revision };
+    }
+
+    /* POST /api/drive-backups/connect — اتصال به پوشه درایو و فعال‌سازی زمان‌بندی */
+    if (method === 'POST' && segs.length === 1 && segs[0] === 'connect') {
+      var folder = resolveDriveFolder_(cfg, body.folderInput || body.folderId || '', body.folderName || '');
+      cfg.connected = true;
+      cfg.folderId = String(folder.getId());
+      cfg.folderName = String(folder.getName() || QC_GAS_DRIVE_DEFAULT_FOLDER);
+      cfg.folderUrl = typeof folder.getUrl === 'function' ? folder.getUrl() : ('https://drive.google.com/drive/folders/' + cfg.folderId);
+      if (body.schedule) cfg.schedule = String(body.schedule);
+      if (body.hour != null && body.hour !== '') cfg.hour = Number(body.hour);
+      if (body.dayOfWeek != null && body.dayOfWeek !== '') cfg.dayOfWeek = Number(body.dayOfWeek);
+      if (body.maxKeep != null && body.maxKeep !== '') cfg.maxKeep = Number(body.maxKeep);
+      cfg.lastError = '';
+      cfg = saveDriveConfig_(cfg);
+      syncDriveTrigger_(cfg);
+      var initial = null;
+      if (body.takeInitialBackup !== false) {
+        var dbInit = normalizeDatabase_(readDatabase_(getSs_, null));
+        initial = writeDriveBackupFile_(dbInit, cfg, 'connect', 'بکاپ اولیه هنگام اتصال به گوگل درایو');
+      }
+      var statusConn = driveStatusPayload_(cfg, true);
+      statusConn.ok = true;
+      statusConn.initialBackup = initial ? initial.backup : null;
+      return { status: 200, data: statusConn, revision: revision };
+    }
+
+    /* PUT /api/drive-backups/config — ویرایش زمان‌بندی، سقف نگهداری یا پوشه */
+    if (method === 'PUT' && segs.length === 1 && segs[0] === 'config') {
+      if (!cfg.connected) return { status: 400, data: { error: 'ابتدا اتصال به گوگل درایو را برقرار کنید.' } };
+      if (body.folderInput || body.folderName) {
+        var nextFolder = resolveDriveFolder_(cfg, body.folderInput || '', body.folderName || '');
+        cfg.folderId = String(nextFolder.getId());
+        cfg.folderName = String(nextFolder.getName() || cfg.folderName);
+        cfg.folderUrl = typeof nextFolder.getUrl === 'function' ? nextFolder.getUrl() : ('https://drive.google.com/drive/folders/' + cfg.folderId);
+      }
+      if (body.schedule != null) cfg.schedule = String(body.schedule);
+      if (body.hour != null && body.hour !== '') cfg.hour = Number(body.hour);
+      if (body.dayOfWeek != null && body.dayOfWeek !== '') cfg.dayOfWeek = Number(body.dayOfWeek);
+      if (body.maxKeep != null && body.maxKeep !== '') cfg.maxKeep = Number(body.maxKeep);
+      cfg = saveDriveConfig_(cfg);
+      syncDriveTrigger_(cfg);
+      var statusUpd = driveStatusPayload_(cfg, true);
+      statusUpd.ok = true;
+      return { status: 200, data: statusUpd, revision: revision };
+    }
+
+    /* POST /api/drive-backups/disconnect — قطع اتصال و حذف زمان‌بندی بدون پاک‌کردن فایل‌ها */
+    if (method === 'POST' && segs.length === 1 && segs[0] === 'disconnect') {
+      removeDriveTriggers_();
+      cfg.connected = false;
+      cfg = saveDriveConfig_(cfg);
+      var statusDisc = driveStatusPayload_(cfg, false);
+      statusDisc.ok = true;
+      return { status: 200, data: statusDisc, revision: revision };
+    }
+
+    /* POST /api/drive-backups/now — بکاپ فوری الان روی گوگل درایو */
+    if (method === 'POST' && segs.length === 1 && segs[0] === 'now') {
+      if (!cfg.connected || !cfg.folderId) {
+        return { status: 400, data: { error: 'ابتدا اتصال به گوگل درایو را برقرار کنید.' } };
+      }
+      var dbNow = normalizeDatabase_(readDatabase_(getSs_, null));
+      var written = writeDriveBackupFile_(dbNow, cfg, body.trigger || 'manual', body.note || '');
+      var statusNow = driveStatusPayload_(cfg, true);
+      return {
+        status: 200,
+        data: { ok: true, backup: written.backup, pruned: written.pruned, status: statusNow },
+        revision: revision
+      };
+    }
+
+    /* GET /api/drive-backups/:id — مشاهده و مقایسه محتوای بکاپ روی خود سیستم */
+    if (method === 'GET' && segs.length === 1) {
+      var loaded = readBackupFileVerified_(cfg, segs[0]);
+      var liveDb = normalizeDatabase_(readDatabase_(getSs_, null));
+      return { status: 200, data: buildBackupInspectPayload_(loaded.backup, loaded.item, liveDb), revision: revision };
+    }
+
+    /* GET /api/drive-backups/:id/download — دریافت JSON خام فایل بکاپ */
+    if (method === 'GET' && segs.length === 2 && segs[1] === 'download') {
+      var dl = readBackupFileVerified_(cfg, segs[0]);
+      return {
+        status: 200,
+        data: { ok: true, filename: dl.item.name, url: dl.item.url, downloadUrl: dl.item.downloadUrl, backup: dl.backup },
+        revision: revision
+      };
+    }
+
+    /* POST /api/drive-backups/:id/restore — بازگردانی مستقیم از درایو به شیت (با بکاپ ایمنی اختیاری) */
+    if (method === 'POST' && segs.length === 2 && segs[1] === 'restore') {
+      var target = readBackupFileVerified_(cfg, segs[0]);
+      var mode = body.mode === 'append' ? 'append' : 'replace';
+      var liveBefore = normalizeDatabase_(readDatabase_(getSs_, null));
+      liveBefore.settings.authMode = 'on';
+      var beforeFp = diffFingerprints_(liveBefore);
+
+      var safetyBackup = null;
+      if (body.autoSafetyBackup !== false) {
+        var sRes = writeDriveBackupFile_(liveBefore, cfg, 'pre-restore', 'بکاپ ایمنی خودکار پیش از بازگردانی ' + target.item.name);
+        safetyBackup = sRes.backup;
+      }
+
+      var restored = window.QCImport.restore(liveBefore, target.backup, mode);
+      if (window.QCExpertRef && window.QCExpertRef.ensure) window.QCExpertRef.ensure(liveBefore);
+      liveBefore.settings.authMode = 'on';
+
+      if (target.backup.callReportStorage && typeof target.backup.callReportStorage === 'object') {
+        Object.keys(QC_GAS_CALL_REPORT_KEYS).forEach(function (k) {
+          if (target.backup.callReportStorage[k] != null) {
+            try { writeCallReportSetting_(getSs_(), k, String(target.backup.callReportStorage[k])); } catch (ignored) {}
+          }
+        });
+      }
+
+      writeDatabaseDiffFp_(getSs_(), beforeFp, liveBefore, false);
+      invalidateTabCache_();
+      var nextRev = bumpRevision_();
+      publishRevision_(nextRev, liveBefore);
+      return {
+        status: 200,
+        data: { ok: true, mode: mode, restored: restored, safetyBackup: safetyBackup, revision: nextRev },
+        revision: nextRev
+      };
+    }
+
+    /* DELETE /api/drive-backups/:id — انتقال فایل بکاپ به سطل زباله درایو */
+    if (method === 'DELETE' && segs.length === 1) {
+      var delTarget = readBackupFileVerified_(cfg, segs[0]);
+      delTarget.file.setTrashed(true);
+      return { status: 200, data: { ok: true, deletedId: delTarget.item.id, status: driveStatusPayload_(cfg, true) }, revision: revision };
+    }
+
+    return { status: 404, data: { error: 'مسیر بکاپ درایو یافت نشد.' } };
+  } catch (err) {
+    if (isDriveAuthError_(err)) {
+      var authStatus = driveStatusPayload_(cfg, false);
+      authStatus.connected = false;
+      authStatus.needsAuthorization = true;
+      authStatus.authError = String((err && err.message) || err);
+      return { status: 200, data: authStatus, revision: revision };
+    }
+    var code = (err && err.status) ? Number(err.status) : 500;
+    return { status: code, data: { error: String((err && err.message) || err) } };
+  }
+}
+
+/**
+ * منوی داخل گوگل شیت: باعث بازشدن پنجره رسمی درخواست مجوز گوگل درایو (OAuth)
+ * توسط مالک شیت شده و پوشه بکاپ و زمان‌بندی خودکار روزانه را برقرار می‌کند.
+ */
+function connectDriveBackupFromSheet_() {
+  var ss = requireSheetContext_();
+  var cfg = loadDriveConfig_();
+  /* دسترسی اولیه به درایو تا پنجره صدور مجوز گوگل فعال شود */
+  DriveApp.getRootFolder();
+  var folder = resolveDriveFolder_(cfg, cfg.folderId, cfg.folderName || QC_GAS_DRIVE_DEFAULT_FOLDER);
+  cfg.connected = true;
+  cfg.folderId = String(folder.getId());
+  cfg.folderName = String(folder.getName() || QC_GAS_DRIVE_DEFAULT_FOLDER);
+  cfg.folderUrl = typeof folder.getUrl === 'function' ? folder.getUrl() : ('https://drive.google.com/drive/folders/' + cfg.folderId);
+  if (!cfg.schedule || cfg.schedule === 'off') cfg.schedule = 'daily';
+  cfg.lastError = '';
+  cfg = saveDriveConfig_(cfg);
+  syncDriveTrigger_(cfg);
+
+  var existing = listDriveBackupFiles_(cfg);
+  var firstBackup = null;
+  if (!existing.length) {
+    var db = normalizeDatabase_(readDatabase_(ss, null));
+    firstBackup = writeDriveBackupFile_(db, cfg, 'connect', 'بکاپ اولیه پس از صدور مجوز گوگل درایو');
+  }
+  try {
+    SpreadsheetApp.getUi().alert(
+      'اتصال گوگل درایو برقرار شد ✅\n\n' +
+      'پوشه بکاپ: ' + cfg.folderName + '\n' +
+      'لینک پوشه: ' + cfg.folderUrl + '\n' +
+      'زمان‌بندی خودکار: ' + cfg.schedule + ' (ساعت ' + cfg.hour + ':00)\n\n' +
+      'اکنون از داخل سامانه (مرکز داده) می‌توانید بکاپ‌ها را مشاهده، تنظیم یا بازگردانی کنید.'
+    );
+  } catch (ignored) {}
+  return { ok: true, config: cfg, initialBackup: firstBackup ? firstBackup.backup : null };
+}
+
+/**
+ * اجرای خودکار زمان‌بندی‌شده (Time-Driven Trigger) برای ذخیره بکاپ در گوگل درایو.
+ * در فراخوانی از محیط وب (بدون triggerUid معتبر و بدون شیت فعال) مسدود می‌شود.
+ */
+function crmqcScheduledDriveBackup_(e) {
+  var expectedUid = PropertiesService.getScriptProperties().getProperty(QC_GAS_DRIVE_TRIGGER_UID_KEY) || '';
+  var validTrigger = !!(e && e.triggerUid && expectedUid && String(e.triggerUid) === String(expectedUid));
+  if (!validTrigger) requireSheetContext_();
+
+  var cfg = loadDriveConfig_();
+  if (!cfg.connected || !cfg.folderId || cfg.schedule === 'off') return { skipped: true };
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = getDatabaseSpreadsheet_();
+    var db = normalizeDatabase_(readDatabase_(ss, null));
+    var res = writeDriveBackupFile_(db, cfg, 'auto', 'بکاپ خودکار زمان‌بندی‌شده');
+    return { ok: true, backup: res.backup, pruned: res.pruned };
+  } catch (err) {
+    cfg.lastError = String((err && err.message) || err);
+    saveDriveConfig_(cfg);
+    throw err;
+  } finally {
+    lock.releaseLock();
+  }
+}
+

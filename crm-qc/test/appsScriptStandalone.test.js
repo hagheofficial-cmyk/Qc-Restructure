@@ -747,7 +747,7 @@ test('anonymous login is throttled and error messages do not enumerate users', (
 test('generated server has no public administrative RPC functions', () => {
   const { context } = createAppsScriptContext();
   const exposed = Object.keys(context).filter(name => typeof context[name] === 'function' && !name.endsWith('_'));
-  assert.deepEqual(exposed.sort(), ['URLSearchParams', 'crmqcApi', 'doGet', 'getCallReportHtml', 'getCallReportSettings', 'onOpen', 'saveCallReportSetting', 'setupStandaloneApp', 'createFirstAdminFromSheet', 'resetAdminFromSheet', 'refreshFromSheet', 'rebuildMonthlySummary', 'clearSessions', 'crmqcOnSheetChange'].sort());
+  assert.deepEqual(exposed.sort(), ['URLSearchParams', 'crmqcApi', 'doGet', 'getCallReportHtml', 'getCallReportSettings', 'onOpen', 'saveCallReportSetting', 'setupStandaloneApp', 'createFirstAdminFromSheet', 'resetAdminFromSheet', 'refreshFromSheet', 'rebuildMonthlySummary', 'clearSessions', 'crmqcOnSheetChange', 'connectDriveBackupFromSheet', 'crmqcScheduledDriveBackup'].sort());
 });
 
 
@@ -756,7 +756,7 @@ test('owner-only menu functions fail in a web-app context', () => {
   context.setupStandaloneApp();
   const epoch = properties.get('QC_GAS_TOKEN_EPOCH');
   context.SpreadsheetApp.getActiveSpreadsheet = () => null;
-  for (const name of ['setupStandaloneApp', 'createFirstAdminFromSheet', 'resetAdminFromSheet', 'refreshFromSheet', 'rebuildMonthlySummary', 'clearSessions', 'crmqcOnSheetChange'])
+  for (const name of ['setupStandaloneApp', 'createFirstAdminFromSheet', 'resetAdminFromSheet', 'refreshFromSheet', 'rebuildMonthlySummary', 'clearSessions', 'crmqcOnSheetChange', 'connectDriveBackupFromSheet', 'crmqcScheduledDriveBackup'])
     assert.throws(() => context[name](), undefined, name);
   assert.equal(properties.get('QC_GAS_TOKEN_EPOCH'), epoch);
 });

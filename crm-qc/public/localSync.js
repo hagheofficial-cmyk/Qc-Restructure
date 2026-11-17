@@ -92,6 +92,7 @@ function isLocalRead(url) {
   if (p.indexOf('/api/') !== 0) return false;
   if (p.indexOf('/api/auth/') === 0) return false;
   if (p === '/api/revision' || p === '/api/local-sync' || p === '/api/batch-sync' || p === '/api/backup') return false;
+  if (p === '/api/drive-backups' || p.indexOf('/api/drive-backups/') === 0) return false;
   if (p === '/api/calls' && parts.qs.indexOf('full=1') >= 0) return false;
   return true;
 }
@@ -665,7 +666,14 @@ async function intercept(method, url, body, rawRequestFn) {
    * ابتدا صف فعلی تخلیه می‌شود تا ترتیب زمانی حفظ شود، سپس مستقیم روی شیت و تازه‌سازی RAM. */
   await flush();
   var serverRes = await rawRequestFn(m, url, body);
-  if (splitUrl(url).path.indexOf('/api/auth/') !== 0) {
+  var reqPath = splitUrl(url).path;
+  var isDriveMetaOp = (reqPath === '/api/drive-backups' || reqPath.indexOf('/api/drive-backups/') === 0) &&
+    !/\/restore$/.test(reqPath);
+  if (reqPath.indexOf('/api/auth/') !== 0 && !isDriveMetaOp) {
+    if (/^\/api\/drive-backups\/.+\/restore$/.test(reqPath)) {
+      state.idMap = {};
+      state.conflicts = [];
+    }
     await hydrate(true);
   }
   return serverRes;

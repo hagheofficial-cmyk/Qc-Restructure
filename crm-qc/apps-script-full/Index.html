@@ -1544,6 +1544,34 @@ table.profile-call-table { width:100%; min-width:0; table-layout:fixed; font-siz
 [data-theme="light"] .rl-comment, [data-theme="light"] .rl-comment-only { color:#1f2f46; }
 [data-theme="light"] .rl-tag { background:#fef3c7; color:#92400e; border-color:#f59e0b66; }
 
+/* ===== اتصال به گوگل درایو و بکاپ خودکار + بازرس بکاپ ===== */
+.drv-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:10px; padding:12px 14px; border-radius:12px; background:var(--soft); border:1px solid var(--line); }
+.drv-meta { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; font-size:12.4px; color:var(--ink-2); }
+.drv-meta-item { display:inline-flex; align-items:center; gap:6px; }
+.drv-meta-item i { color:var(--brand); }
+.drv-auth-box { padding:14px 16px; border-radius:12px; background:var(--warn-soft); border:1px solid rgba(251,191,36,.35); display:flex; flex-direction:column; gap:10px; }
+.drv-auth-box h4 { margin:0; font-size:14px; color:var(--warn); display:flex; align-items:center; gap:8px; }
+.drv-auth-steps { margin:0; padding-inline-start:20px; display:flex; flex-direction:column; gap:5px; font-size:12.6px; color:var(--ink-2); line-height:1.7; }
+.drv-cfg-panel { padding:14px; border-radius:12px; background:var(--panel); border:1px solid var(--line); display:flex; flex-direction:column; gap:12px; }
+.drv-chips { display:flex; flex-wrap:wrap; gap:5px; }
+.drv-chip { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:700; background:var(--soft); border:1px solid var(--line); color:var(--ink-2); white-space:nowrap; }
+.drv-diff-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; }
+.drv-diff-tile { padding:9px 11px; border-radius:10px; background:var(--soft); border:1px solid var(--line); display:flex; flex-direction:column; gap:3px; }
+.drv-diff-tile .t-lbl { font-size:11px; color:var(--muted); }
+.drv-diff-tile .t-val { font-size:16px; font-weight:800; color:var(--ink); display:flex; align-items:baseline; justify-content:space-between; gap:6px; }
+.drv-diff-tile .t-sub { font-size:11px; color:var(--muted); display:flex; justify-content:space-between; gap:4px; }
+.drv-delta-pos { color:var(--good); font-weight:800; font-size:11px; }
+.drv-delta-neg { color:var(--bad); font-weight:800; font-size:11px; }
+.drv-delta-eq { color:var(--muted); font-size:11px; }
+.drv-inspect-tabs { display:flex; flex-wrap:wrap; gap:6px; border-bottom:1px solid var(--line); padding-bottom:9px; }
+.drv-inspect-tab { padding:6px 11px; border-radius:9px; border:1px solid var(--line); background:var(--soft); color:var(--ink-2); font-size:12px; font-weight:700; cursor:pointer; }
+.drv-inspect-tab.active { background:var(--brand); color:#fff; border-color:var(--brand); }
+.drv-inspect-body { max-height:46vh; overflow:auto; border:1px solid var(--line); border-radius:10px; background:var(--panel); }
+.drv-restore-opt { display:flex; gap:10px; align-items:flex-start; padding:11px 13px; border-radius:11px; border:1px solid var(--line); background:var(--soft); cursor:pointer; }
+.drv-restore-opt input { margin-top:3px; }
+.drv-restore-opt:has(input:checked) { border-color:var(--brand); background:var(--brand-soft); }
+
+
 
 </style>
 
@@ -5488,7 +5516,7 @@ const SHARED_ROUTES = ['dashboard', 'tickets', 'tickets-new', 'socials', 'social
 
 /* اندپوینت‌هایی که همیشه مخصوص مدیرند (بدون توجه به نقش درخواست‌کننده). */
 const ADMIN_API = ['/api/criteria', '/api/settings', '/api/qc-users', '/api/fiscal-months', '/api/elements',
-  '/api/backup', '/api/demo', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
+  '/api/backup', '/api/drive-backups', '/api/demo', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
   '/api/action-types', '/api/agents'];
 
 /* خواندن‌هایی که برای صفحه‌های عملیاتیِ کارشناس QC لازم‌اند (با داده‌ی محدودشده)؛
@@ -6862,6 +6890,12 @@ function dispatch(method, url, body) {
     X.ensure(db);
     saveDb(); return clone(result);
   }
+  if (name === 'drive-backups') {
+    if (method === 'GET') {
+      return { supported: false, provider: 'offline', connected: false, needsAuthorization: false, config: {}, backups: [] };
+    }
+    bad('اتصال مستقیم به گوگل درایو فقط در نسخه Apps Script یا سرور فعال است.', 400);
+  }
   if (name === 'monthly-scores') {
     if (!Array.isArray(db.monthlyScores)) db.monthlyScores = [];
     if (id == null && method === 'GET') {
@@ -7397,6 +7431,7 @@ function isLocalRead(url) {
   if (p.indexOf('/api/') !== 0) return false;
   if (p.indexOf('/api/auth/') === 0) return false;
   if (p === '/api/revision' || p === '/api/local-sync' || p === '/api/batch-sync' || p === '/api/backup') return false;
+  if (p === '/api/drive-backups' || p.indexOf('/api/drive-backups/') === 0) return false;
   if (p === '/api/calls' && parts.qs.indexOf('full=1') >= 0) return false;
   return true;
 }
@@ -7970,7 +8005,14 @@ async function intercept(method, url, body, rawRequestFn) {
    * ابتدا صف فعلی تخلیه می‌شود تا ترتیب زمانی حفظ شود، سپس مستقیم روی شیت و تازه‌سازی RAM. */
   await flush();
   var serverRes = await rawRequestFn(m, url, body);
-  if (splitUrl(url).path.indexOf('/api/auth/') !== 0) {
+  var reqPath = splitUrl(url).path;
+  var isDriveMetaOp = (reqPath === '/api/drive-backups' || reqPath.indexOf('/api/drive-backups/') === 0) &&
+    !/\/restore$/.test(reqPath);
+  if (reqPath.indexOf('/api/auth/') !== 0 && !isDriveMetaOp) {
+    if (/^\/api\/drive-backups\/.+\/restore$/.test(reqPath)) {
+      state.idMap = {};
+      state.conflicts = [];
+    }
     await hydrate(true);
   }
   return serverRes;
@@ -15180,6 +15222,21 @@ async function render(root) {
     </div>
   </div>
 
+  <!-- اتصال به گوگل درایو و بکاپ خودکار ابری -->
+  <div class="card" id="driveBackupCard" style="margin-bottom:16px">
+    <div class="card-head">
+      <div class="head-icon" style="background:var(--brand-soft);color:var(--brand)"><i class="fa-brands fa-google-drive"></i></div>
+      <div style="flex:1">
+        <h3>اتصال به گوگل درایو و بکاپ خودکار ابری</h3>
+        <div class="sub">اتصال مستقیم به پوشه گوگل درایو، زمان‌بندی خودکار پشتیبان‌گیری، مشاهده و مقایسه محتوای بکاپ‌ها روی سامانه و بازگردانی ایمن</div>
+      </div>
+      <span class="badge soft" id="drvStatusBadge">در حال بررسی…</span>
+    </div>
+    <div class="card-pad" id="drvBody" style="display:flex;flex-direction:column;gap:12px">
+      <div class="note" style="margin:0"><i class="fa-solid fa-spinner fa-spin"></i> در حال خواندن وضعیت اتصال گوگل درایو…</div>
+    </div>
+  </div>
+
   <!-- بک‌اپ و بازیابی -->
   <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));margin-bottom:16px">
     <div class="card">
@@ -15891,9 +15948,644 @@ async function render(root) {
 
   $('#btnRescan').addEventListener('click', async () => { await loadStatus(); await loadFiles(); toast.info('تازه‌سازی شد'); });
 
+  /* ------- اتصال به گوگل درایو، زمان‌بندی بکاپ خودکار، مشاهده و بازگردانی ------- */
+  const DRV_SCHED_LABELS = {
+    off: 'فقط دستی (بدون زمان‌بندی)',
+    '6h': 'هر ۶ ساعت یک‌بار',
+    '12h': 'هر ۱۲ ساعت یک‌بار',
+    daily: 'روزانه',
+    weekly: 'هفتگی'
+  };
+  const DRV_WEEK_LABELS = { 1: 'دوشنبه', 2: 'سه‌شنبه', 3: 'چهارشنبه', 4: 'پنج‌شنبه', 5: 'جمعه', 6: 'شنبه', 7: 'یک‌شنبه' };
+  const DRV_TRIG_META = {
+    auto: { label: 'خودکار', cls: 'good', icon: 'fa-clock-rotate-left' },
+    manual: { label: 'دستی', cls: 'info', icon: 'fa-hand' },
+    connect: { label: 'اتصال اولیه', cls: 'info', icon: 'fa-plug-circle-check' },
+    'pre-restore': { label: 'ایمنی پیش از بازگردانی', cls: 'warn', icon: 'fa-shield-halved' }
+  };
+  let driveState = null;
+  let driveCfgOpen = false;
+
+  function fmtBytes(n) {
+    const v = Number(n) || 0;
+    if (v >= 1024 * 1024) return fa((v / (1024 * 1024)).toFixed(2)) + ' مگابایت';
+    if (v >= 1024) return fa(Math.round(v / 1024)) + ' کیلوبایت';
+    return fa(v) + ' بایت';
+  }
+  function fmtIsoJalali(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return esc(String(iso));
+    const j = C.gregorianToJalali ? C.gregorianToJalali(d.getFullYear(), d.getMonth() + 1, d.getDate()) : null;
+    const pad = (x) => String(x).padStart(2, '0');
+    const time = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    return j ? (fa(`${j.jy}/${pad(j.jm)}/${pad(j.jd)}`) + ' · ' + fa(time)) : fa(iso.slice(0, 16).replace('T', ' '));
+  }
+  function schedSummary(cfg) {
+    if (!cfg || !cfg.schedule || cfg.schedule === 'off') return 'فقط دستی (زمان‌بندی خاموش)';
+    const pad = (x) => String(x).padStart(2, '0');
+    if (cfg.schedule === 'daily') return `روزانه ساعت ${fa(pad(cfg.hour || 0) + ':00')}`;
+    if (cfg.schedule === 'weekly') return `هفتگی (${DRV_WEEK_LABELS[cfg.dayOfWeek] || 'جمعه'} ساعت ${fa(pad(cfg.hour || 0) + ':00')})`;
+    return DRV_SCHED_LABELS[cfg.schedule] || cfg.schedule;
+  }
+  function hourOptionsHtml(sel) {
+    let out = '';
+    for (let h = 0; h < 24; h++) {
+      const lbl = fa(String(h).padStart(2, '0') + ':00');
+      out += `<option value="${h}" ${Number(sel) === h ? 'selected' : ''}>${lbl}</option>`;
+    }
+    return out;
+  }
+  function scheduleFormHtml(cfg, isConnect) {
+    const c = cfg || { schedule: 'daily', hour: 2, dayOfWeek: 5, maxKeep: 30, folderName: 'پشتیبان‌گیری سامانه QC' };
+    const showHour = c.schedule === 'daily' || c.schedule === 'weekly';
+    const showDay = c.schedule === 'weekly';
+    return `
+      <div class="form-grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">
+        <div class="field" style="grid-column:1 / -1">
+          <label>پوشه مقصد در گوگل درایو (اختیاری)</label>
+          <input class="input" id="drvFolderInput" value="${esc(c.folderUrl || '')}" placeholder="لینک یا شناسه پوشه موجود در درایو (خالی = پوشه خودکار «${esc(c.folderName || 'پشتیبان‌گیری سامانه QC')}»)">
+        </div>
+        <div class="field">
+          <label>بازه زمان‌بندی بکاپ خودکار</label>
+          <select class="input" id="drvSchedule">
+            <option value="6h" ${c.schedule === '6h' ? 'selected' : ''}>هر ۶ ساعت یک‌بار</option>
+            <option value="12h" ${c.schedule === '12h' ? 'selected' : ''}>هر ۱۲ ساعت یک‌بار</option>
+            <option value="daily" ${c.schedule === 'daily' ? 'selected' : ''}>روزانه (پیشنهادی)</option>
+            <option value="weekly" ${c.schedule === 'weekly' ? 'selected' : ''}>هفتگی</option>
+            <option value="off" ${c.schedule === 'off' ? 'selected' : ''}>فقط دستی (بدون زمان‌بندی)</option>
+          </select>
+        </div>
+        <div class="field" id="drvHourWrap" style="${showHour ? '' : 'display:none'}">
+          <label>ساعت اجرای بکاپ خودکار</label>
+          <select class="input" id="drvHour">${hourOptionsHtml(c.hour == null ? 2 : c.hour)}</select>
+        </div>
+        <div class="field" id="drvDayWrap" style="${showDay ? '' : 'display:none'}">
+          <label>روز هفته</label>
+          <select class="input" id="drvDay">
+            ${[6, 7, 1, 2, 3, 4, 5].map((d) => `<option value="${d}" ${Number(c.dayOfWeek || 5) === d ? 'selected' : ''}>${DRV_WEEK_LABELS[d]}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>سقف نگهداری نسخه‌ها (پاک‌سازی قدیمی‌ترها)</label>
+          <input class="input" id="drvMaxKeep" type="number" min="5" max="200" value="${Number(c.maxKeep) || 30}">
+        </div>
+      </div>
+      ${isConnect ? `<label style="display:flex;align-items:center;gap:8px;font-size:12.6px;cursor:pointer">
+        <input type="checkbox" id="drvInitSnap" checked>
+        <span>بلافاصله پس از اتصال، اولین بکاپ کامل روی گوگل درایو ذخیره شود</span>
+      </label>` : ''}
+    `;
+  }
+  function bindScheduleVisibility(scope) {
+    const sel = $('#drvSchedule', scope);
+    if (!sel) return;
+    const sync = () => {
+      const v = sel.value;
+      const hw = $('#drvHourWrap', scope);
+      const dw = $('#drvDayWrap', scope);
+      if (hw) hw.style.display = (v === 'daily' || v === 'weekly') ? '' : 'none';
+      if (dw) dw.style.display = v === 'weekly' ? '' : 'none';
+    };
+    sel.addEventListener('change', sync);
+    sync();
+  }
+  function readScheduleForm(scope) {
+    const rawFolder = ($('#drvFolderInput', scope) && $('#drvFolderInput', scope).value || '').trim();
+    const looksLikeIdOrUrl = /folders\/|[?&]id=|^[a-zA-Z0-9_-]{15,}$/.test(rawFolder);
+    return {
+      folderInput: looksLikeIdOrUrl ? rawFolder : '',
+      folderName: (!looksLikeIdOrUrl && rawFolder) ? rawFolder : '',
+      schedule: ($('#drvSchedule', scope) && $('#drvSchedule', scope).value) || 'daily',
+      hour: Number($('#drvHour', scope) && $('#drvHour', scope).value || 2),
+      dayOfWeek: Number($('#drvDay', scope) && $('#drvDay', scope).value || 5),
+      maxKeep: Math.max(5, Math.min(200, Number($('#drvMaxKeep', scope) && $('#drvMaxKeep', scope).value || 30)))
+    };
+  }
+  function countChipsHtml(c) {
+    if (!c) return '<span class="muted">—</span>';
+    const parts = [
+      ['تیکت', c.tickets],
+      ['سوشال', c.socials],
+      ['تماس', c.calls],
+      ['موقعیتی', c.callSituational],
+      ['کارشناس', c.agents],
+      ['اقدام', c.actions]
+    ].filter((p) => Number(p[1]) > 0);
+    if (!parts.length) return '<span class="drv-chip">خالی</span>';
+    return '<div class="drv-chips">' + parts.map((p) => `<span class="drv-chip">${p[0]}: ${fa(p[1])}</span>`).join('') + '</div>';
+  }
+
+  async function downloadDriveBackup(item) {
+    if (!item || !item.id) return;
+    try {
+      toast.info('در حال دریافت فایل بکاپ…');
+      const r = await api.get('/api/drive-backups/' + encodeURIComponent(item.id) + '/download');
+      if (r && r.backup) {
+        const blob = new Blob([JSON.stringify(r.backup, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = r.filename || item.name || 'qc-backup.json';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        toast.success('فایل بکاپ دانلود شد');
+      } else if (item.downloadUrl) {
+        window.open(item.downloadUrl, '_blank', 'noopener');
+      }
+    } catch (e) {
+      if (item.downloadUrl) {
+        window.open(item.downloadUrl, '_blank', 'noopener');
+      } else {
+        toast.error(e.message || 'خطا در دانلود بکاپ');
+      }
+    }
+  }
+
+  function openDriveRestoreModal(item) {
+    if (!item || !item.id) return;
+    const m = UI.modal(`
+      ${UI.modalHead('بازگردانی سامانه از بکاپ درایو', 'fa-rotate-left')}
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+        <div class="drv-bar">
+          <div class="drv-meta">
+            <span class="drv-meta-item"><i class="fa-solid fa-file-code"></i> <b dir="ltr">${esc(item.name)}</b></span>
+            <span class="drv-meta-item"><i class="fa-regular fa-clock"></i> ${fmtIsoJalali(item.createdAt)}</span>
+            <span class="drv-meta-item"><i class="fa-solid fa-database"></i> ${fmtBytes(item.size)}</span>
+          </div>
+          ${countChipsHtml(item.counts)}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label class="drv-restore-opt">
+            <input type="radio" name="drvRestMode" value="replace" checked>
+            <div>
+              <div style="font-weight:800;font-size:13px">جایگزینی کامل (بازگشت دقیق به زمان این بکاپ)</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px">تمام تیکت‌ها، سوشال، تماس‌ها، کارشناسان، اقدامات، یادآورها، ماه‌های مالی، کاربران و تنظیمات به وضعیت این نسخه برمی‌گردند.</div>
+            </div>
+          </label>
+          <label class="drv-restore-opt">
+            <input type="radio" name="drvRestMode" value="append">
+            <div>
+              <div style="font-weight:800;font-size:13px">ادغام بدون حذف (افزودن رکوردهای مفقود)</div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px">رکوردهای جدیدتر فعلی دست‌نخورده می‌مانند و فقط رکوردهایی که در این بکاپ بوده و اکنون وجود ندارند اضافه می‌شوند.</div>
+            </div>
+          </label>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.6px;padding:8px 10px;border-radius:9px;background:var(--good-soft);color:var(--good);cursor:pointer">
+          <input type="checkbox" id="drvAutoSafety" checked>
+          <span><b>محافظت ایمنی:</b> پیش از بازگردانی، یک بکاپ خودکار از وضعیت فعلی سامانه روی درایو ذخیره شود (پیشنهادی)</span>
+        </label>
+        <div id="drvRestoreStatus" style="display:none;font-size:12.4px;padding:9px 12px;border-radius:9px"></div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" data-close>انصراف</button>
+        <button class="btn primary" id="drvConfirmRestoreBtn"><i class="fa-solid fa-rotate-left"></i> اجرای بازگردانی</button>
+      </div>
+    `);
+    $('#drvConfirmRestoreBtn', m).addEventListener('click', async () => {
+      const btn = $('#drvConfirmRestoreBtn', m);
+      const st = $('#drvRestoreStatus', m);
+      const modeEl = $('input[name="drvRestMode"]:checked', m);
+      const mode = modeEl ? modeEl.value : 'replace';
+      const autoSafetyBackup = !!($('#drvAutoSafety', m) && $('#drvAutoSafety', m).checked);
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> در حال بازگردانی…';
+      st.style.display = 'block';
+      st.style.background = 'var(--soft)';
+      st.style.color = 'var(--ink-2)';
+      st.textContent = autoSafetyBackup ? 'در حال ذخیره بکاپ ایمنی و بازگردانی داده‌ها…' : 'در حال بازگردانی داده‌ها…';
+      try {
+        const r = await api.post('/api/drive-backups/' + encodeURIComponent(item.id) + '/restore', { mode, autoSafetyBackup });
+        toast.success(mode === 'append' ? 'ادغام از بکاپ درایو با موفقیت انجام شد' : 'بازگردانی کامل از بکاپ درایو با موفقیت انجام شد');
+        m.close();
+        await App.boot();
+        await loadStatus();
+        await loadFiles();
+        await loadDriveBackups();
+      } catch (e) {
+        st.style.background = 'var(--bad-soft)';
+        st.style.color = 'var(--bad)';
+        st.textContent = 'خطا در بازگردانی: ' + (e.message || 'خطای نامشخص');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> تلاش مجدد';
+      }
+    });
+  }
+
+  async function openDriveInspectModal(item) {
+    if (!item || !item.id) return;
+    const m = UI.modal(`
+      ${UI.modalHead('مشاهده و بررسی محتوای بکاپ', 'fa-magnifying-glass-chart')}
+      <div class="modal-body" id="drvInspectRoot" style="display:flex;flex-direction:column;gap:12px">
+        <div class="note" style="margin:0"><i class="fa-solid fa-spinner fa-spin"></i> در حال خواندن فایل بکاپ از درایو و مقایسه با وضعیت فعلی سامانه…</div>
+      </div>
+      <div class="modal-foot">
+        <button class="btn ghost" data-close>بستن</button>
+        ${item.url ? `<a class="btn soft" href="${esc(item.url)}" target="_blank" rel="noopener"><i class="fa-brands fa-google-drive"></i> مشاهده در درایو</a>` : ''}
+        <button class="btn soft" id="drvInspDlBtn"><i class="fa-solid fa-download"></i> دانلود JSON</button>
+        <button class="btn primary" id="drvInspRestoreBtn"><i class="fa-solid fa-rotate-left"></i> بازگردانی از این بکاپ</button>
+      </div>
+    `, { lg: true });
+    $('#drvInspDlBtn', m).addEventListener('click', () => downloadDriveBackup(item));
+    $('#drvInspRestoreBtn', m).addEventListener('click', () => { m.close(); openDriveRestoreModal(item); });
+
+    try {
+      const data = await api.get('/api/drive-backups/' + encodeURIComponent(item.id));
+      if (!m.isConnected) return;
+      const box = $('#drvInspectRoot', m);
+      const diffDefs = [
+        ['agents', 'کارشناسان'],
+        ['tickets', 'تیکت‌ها'],
+        ['socials', 'سوشال'],
+        ['calls', 'تماس ثابت'],
+        ['callSituational', 'تماس موقعیتی'],
+        ['monthlyScores', 'نمرات ماهانه'],
+        ['actions', 'اقدامات'],
+        ['reminders', 'یادآورها']
+      ];
+      const diffHtml = diffDefs.map(([k, lbl]) => {
+        const d = (data.diff && data.diff[k]) || { backup: 0, live: 0, delta: 0 };
+        const dCls = d.delta > 0 ? 'drv-delta-pos' : d.delta < 0 ? 'drv-delta-neg' : 'drv-delta-eq';
+        const dTxt = d.delta > 0 ? ('+' + fa(d.delta)) : d.delta < 0 ? ('−' + fa(Math.abs(d.delta))) : 'یکسان';
+        return `<div class="drv-diff-tile">
+          <div class="t-lbl">${lbl}</div>
+          <div class="t-val"><span>${fa(d.backup)}</span><span class="${dCls}">${dTxt}</span></div>
+          <div class="t-sub"><span>فعلی: ${fa(d.live)}</span></div>
+        </div>`;
+      }).join('');
+
+      const trig = DRV_TRIG_META[item.trigger] || DRV_TRIG_META.manual;
+      const periodTxt = (data.period && (data.period.from || data.period.to))
+        ? `${fa(data.period.from || '—')} تا ${fa(data.period.to || '—')}` : 'بدون تاریخ ثبت‌شده';
+
+      box.innerHTML = `
+        <div class="drv-bar">
+          <div class="drv-meta">
+            <span class="drv-meta-item"><i class="fa-solid fa-file-code"></i> <b dir="ltr">${esc(item.name)}</b></span>
+            <span class="badge ${trig.cls}"><i class="fa-solid ${trig.icon}"></i> ${trig.label}</span>
+            <span class="drv-meta-item"><i class="fa-regular fa-clock"></i> ${fmtIsoJalali(data.exportedAt || item.createdAt)}</span>
+            <span class="drv-meta-item"><i class="fa-regular fa-calendar"></i> بازه داده: ${periodTxt}</span>
+            <span class="drv-meta-item"><i class="fa-solid fa-weight-hanging"></i> ${fmtBytes(item.size)}</span>
+          </div>
+          ${item.note ? `<div style="font-size:12px;color:var(--ink-2)">یادداشت: ${esc(item.note)}</div>` : ''}
+        </div>
+        <div>
+          <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:6px">مقایسه تعداد رکوردهای این بکاپ با وضعیت فعلی سامانه</div>
+          <div class="drv-diff-grid">${diffHtml}</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between">
+          <div class="drv-inspect-tabs" id="drvInspTabs">
+            <button type="button" class="drv-inspect-tab active" data-tab="summary">خلاصه و تنظیمات</button>
+            <button type="button" class="drv-inspect-tab" data-tab="tickets">تیکت‌ها (${fa(data.counts.tickets)})</button>
+            <button type="button" class="drv-inspect-tab" data-tab="socials">سوشال (${fa(data.counts.socials)})</button>
+            <button type="button" class="drv-inspect-tab" data-tab="calls">تماس‌ها (${fa(data.counts.calls)})</button>
+            <button type="button" class="drv-inspect-tab" data-tab="agents">کارشناسان (${fa(data.counts.agents)})</button>
+            <button type="button" class="drv-inspect-tab" data-tab="actions">اقدامات و یادآورها (${fa(data.counts.actions + data.counts.reminders)})</button>
+          </div>
+          <input class="input sm" id="drvInspSearch" style="width:210px" placeholder="جستجو در محتوای بکاپ…">
+        </div>
+        <div class="drv-inspect-body" id="drvInspContent"></div>
+      `;
+
+      let activeTab = 'summary';
+      const pv = data.preview || {};
+      const renderTab = () => {
+        const q = String($('#drvInspSearch', box).value || '').trim().toLowerCase();
+        const hit = (vals) => !q || vals.some((v) => String(v == null ? '' : v).toLowerCase().includes(q));
+        const host = $('#drvInspContent', box);
+
+        if (activeTab === 'summary') {
+          const st = pv.settings || {};
+          const fmRows = (pv.fiscalMonths || []).map((fm) => `<tr><td>${esc(fm.name)}</td><td dir="ltr">${fa(fm.from)}</td><td dir="ltr">${fa(fm.to)}</td><td>${esc(fm.note || '—')}</td></tr>`).join('');
+          const uRows = (pv.qcUsers || []).map((u) => `<tr><td>${esc(u.name)}</td><td><span class="badge ${u.role === 'admin' ? 'info' : 'soft'}">${u.role === 'admin' ? 'مدیر' : 'کارشناس QC'}</span></td><td>${u.active ? 'فعال' : 'غیرفعال'}</td><td>${esc((u.teams || []).join('، ') || (u.agents || []).join('، ') || (u.exts || []).join('، ') || 'همه')}</td></tr>`).join('');
+          host.innerHTML = `<div style="padding:12px;display:flex;flex-direction:column;gap:12px">
+            <div class="drv-meta">
+              <span class="drv-meta-item"><i class="fa-solid fa-building"></i> سازمان: <b>${esc(st.orgName || '—')}</b></span>
+              <span class="drv-meta-item"><i class="fa-solid fa-stopwatch"></i> SLA سوشال: <b>${fa(st.slaMinutes || 60)} دقیقه</b></span>
+              <span class="drv-meta-item"><i class="fa-solid fa-scale-balanced"></i> وزن تیکت: <b>${fa((st.ticketWeights || []).join(' / ') || '—')}</b></span>
+              <span class="drv-meta-item"><i class="fa-solid fa-scale-balanced"></i> وزن سوشال: <b>${fa((st.socialWeights || []).join(' / ') || '—')}</b></span>
+            </div>
+            <div>
+              <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">ماه‌های مالی ذخیره‌شده (${fa((pv.fiscalMonths || []).length)})</div>
+              ${fmRows ? `<table class="tbl"><thead><tr><th>نام</th><th>از</th><th>تا</th><th>یادداشت</th></tr></thead><tbody>${fmRows}</tbody></table>` : '<div class="muted" style="font-size:12px">ماه مالی ثبت نشده است.</div>'}
+            </div>
+            <div>
+              <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">کاربران سامانه در این بکاپ (${fa((pv.qcUsers || []).length)} · رمزها ایمن و پنهان‌اند)</div>
+              ${uRows ? `<table class="tbl"><thead><tr><th>نام</th><th>نقش</th><th>وضعیت</th><th>دامنه دسترسی</th></tr></thead><tbody>${uRows}</tbody></table>` : '<div class="muted" style="font-size:12px">کاربری ثبت نشده است.</div>'}
+            </div>
+          </div>`;
+          return;
+        }
+        if (activeTab === 'tickets') {
+          const rows = (pv.tickets || []).filter((r) => hit([r.reviewDate, r.agentName, r.team, r.ticketCode, r.qcAgent, r.comment]));
+          const trunc = data.truncated && data.truncated.tickets ? `<div class="note" style="margin:8px">نمایش ${fa((pv.tickets || []).length)} تیکت اخیر از مجموع ${fa(data.counts.tickets)} تیکت (هنگام بازگردانی همه رکوردها برمی‌گردند).</div>` : '';
+          host.innerHTML = trunc + (rows.length
+            ? `<table class="tbl"><thead><tr><th>تاریخ بررسی</th><th>کارشناس</th><th>کد تیکت</th><th>نمره</th><th>ردلاین</th><th>کارشناس QC</th><th>توضیح</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${fa(r.reviewDate || '—')}</td><td>${esc(r.agentName)}</td><td dir="ltr">${esc(r.ticketCode || '—')}</td><td><b>${r.score == null ? '—' : fa(r.score)}</b></td><td>${String(r.redline) === '0' ? '<span class="badge bad">دارد</span>' : '<span class="badge good">خیر</span>'}</td><td>${esc(r.qcAgent || '—')}</td><td>${esc(r.comment || '—')}</td></tr>`).join('')}</tbody></table>`
+            : '<div class="empty-state" style="padding:20px">تیکتی یافت نشد.</div>');
+          return;
+        }
+        if (activeTab === 'socials') {
+          const rows = (pv.socials || []).filter((r) => hit([r.reviewDate, r.agentName, r.messenger, r.responseStatus, r.slaStatus, r.comment]));
+          const trunc = data.truncated && data.truncated.socials ? `<div class="note" style="margin:8px">نمایش ${fa((pv.socials || []).length)} رکورد سوشال اخیر از مجموع ${fa(data.counts.socials)}.</div>` : '';
+          host.innerHTML = trunc + (rows.length
+            ? `<table class="tbl"><thead><tr><th>تاریخ بررسی</th><th>کارشناس</th><th>پیام‌رسان</th><th>وضعیت پاسخ</th><th>SLA</th><th>نمره</th><th>توضیح</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${fa(r.reviewDate || '—')}</td><td>${esc(r.agentName)}</td><td>${esc(r.messenger || '—')}</td><td>${esc(r.responseStatus || '—')}</td><td>${esc(r.slaStatus || '—')}</td><td><b>${r.score == null ? '—' : fa(r.score)}</b></td><td>${esc(r.comment || '—')}</td></tr>`).join('')}</tbody></table>`
+            : '<div class="empty-state" style="padding:20px">رکورد سوشالی یافت نشد.</div>');
+          return;
+        }
+        if (activeTab === 'calls') {
+          const rows = (pv.calls || []).filter((r) => hit([r.reviewDate, r.expertName, r.team, r.formType, r.redlineReason, r.qcComment, r.sourceFile]));
+          const trunc = data.truncated && data.truncated.calls ? `<div class="note" style="margin:8px">نمایش ${fa((pv.calls || []).length)} تماس اخیر از مجموع ${fa(data.counts.calls)} تماس ثابت (و ${fa(data.counts.callSituational)} موقعیتی).</div>` : '';
+          host.innerHTML = trunc + (rows.length
+            ? `<table class="tbl"><thead><tr><th>تاریخ بررسی</th><th>کارشناس</th><th>فرم</th><th>نمره</th><th>ردلاین</th><th>توضیحات / علت ردلاین</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${fa(r.reviewDate || '—')}</td><td>${esc(r.expertName)}</td><td>${esc(r.formType || '—')}</td><td><b>${r.score == null ? '—' : fa(r.score)}</b></td><td>${r.redline ? '<span class="badge bad">دارد</span>' : '<span class="badge good">خیر</span>'}</td><td>${esc(r.redlineReason || r.qcComment || '—')}</td></tr>`).join('')}</tbody></table>`
+            : '<div class="empty-state" style="padding:20px">رکورد تماسی یافت نشد.</div>');
+          return;
+        }
+        if (activeTab === 'agents') {
+          const rows = (pv.agents || []).filter((a) => hit([a.name, a.ext, a.team, a.subgroup, (a.qcAgents || []).join(' ')]));
+          host.innerHTML = rows.length
+            ? `<table class="tbl"><thead><tr><th>نام کارشناس</th><th>داخلی</th><th>تیم</th><th>زیرگروه</th><th>وضعیت</th><th>کارشناس QC</th></tr></thead><tbody>${rows.map((a) => `<tr><td><b>${esc(a.name)}</b></td><td dir="ltr">${fa(a.ext || '—')}</td><td>${esc(a.team || '—')}</td><td>${esc(a.subgroup || '—')}</td><td>${a.active !== false ? '<span class="badge good">فعال</span>' : '<span class="badge soft">غیرفعال</span>'}</td><td>${esc((a.qcAgents || []).join('، ') || '—')}</td></tr>`).join('')}</tbody></table>`
+            : '<div class="empty-state" style="padding:20px">کارشناسی یافت نشد.</div>';
+          return;
+        }
+        if (activeTab === 'actions') {
+          const acts = (pv.actions || []).filter((a) => hit([a.agent, a.title, a.date, a.status, a.result, a.note]));
+          const rems = (pv.reminders || []).filter((r) => hit([r.agent, r.date, r.text]));
+          host.innerHTML = `<div style="padding:10px;display:flex;flex-direction:column;gap:12px">
+            <div>
+              <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">اقدامات (${fa(acts.length)})</div>
+              ${acts.length ? `<table class="tbl"><thead><tr><th>تاریخ</th><th>کارشناس</th><th>عنوان اقدام</th><th>وضعیت</th><th>نتیجه</th></tr></thead><tbody>${acts.map((a) => `<tr><td>${fa(a.date || '—')}</td><td>${esc(a.agent)}</td><td>${esc(a.title || '—')}</td><td>${esc(a.status || '—')}</td><td>${esc(a.result || '—')}</td></tr>`).join('')}</tbody></table>` : '<div class="muted" style="font-size:12px">اقدامی یافت نشد.</div>'}
+            </div>
+            <div>
+              <div style="font-weight:700;font-size:12.5px;margin-bottom:6px">یادآورها (${fa(rems.length)})</div>
+              ${rems.length ? `<table class="tbl"><thead><tr><th>تاریخ</th><th>کارشناس</th><th>متن یادآور</th><th>وضعیت</th></tr></thead><tbody>${rems.map((r) => `<tr><td>${fa(r.date || '—')}</td><td>${esc(r.agent || '—')}</td><td>${esc(r.text || '—')}</td><td>${r.done ? '<span class="badge good">انجام‌شده</span>' : '<span class="badge warn">در انتظار</span>'}</td></tr>`).join('')}</tbody></table>` : '<div class="muted" style="font-size:12px">یادآوری یافت نشد.</div>'}
+            </div>
+          </div>`;
+        }
+      };
+
+      $$('.drv-inspect-tab', box).forEach((btn) => btn.addEventListener('click', () => {
+        activeTab = btn.dataset.tab;
+        $$('.drv-inspect-tab', box).forEach((b) => b.classList.toggle('active', b === btn));
+        renderTab();
+      }));
+      $('#drvInspSearch', box).addEventListener('input', renderTab);
+      renderTab();
+    } catch (e) {
+      if (!m.isConnected) return;
+      $('#drvInspectRoot', m).innerHTML = `<div class="note" style="background:var(--bad-soft);color:var(--bad);margin:0"><i class="fa-solid fa-triangle-exclamation"></i> خطا در خواندن محتوای بکاپ: ${esc(e.message || 'خطای نامشخص')}</div>`;
+    }
+  }
+
+  function renderDriveBackups(st) {
+    driveState = st;
+    const badge = $('#drvStatusBadge', root);
+    const body = $('#drvBody', root);
+    if (!badge || !body) return;
+
+    if (!st || !st.supported) {
+      badge.className = 'badge soft';
+      badge.textContent = 'در حالت آفلاین غیرفعال';
+      body.innerHTML = `<div class="note" style="margin:0"><i class="fa-solid fa-circle-info"></i> اتصال مستقیم به گوگل درایو و بکاپ خودکار زمان‌بندی‌شده در نسخه <b>Google Apps Script</b> (یا سرور آنلاین) فعال است. در حالت فایل آفلاین می‌توانید از دکمه‌های بکاپ و بازیابی دستی زیر استفاده کنید.</div>`;
+      return;
+    }
+
+    if (st.needsAuthorization) {
+      badge.className = 'badge warn';
+      badge.textContent = 'نیاز به تأیید دسترسی درایو';
+      body.innerHTML = `
+        <div class="drv-auth-box">
+          <h4><i class="fa-solid fa-key"></i> درخواست مجوز دسترسی به گوگل درایو</h4>
+          <div style="font-size:12.5px;color:var(--ink-2)">برای اینکه سامانه بتواند پوشه بکاپ بسازد و به‌صورت خودکار روی گوگل درایو پشتیبان‌گیری کند، مالک گوگل شیت باید یک‌بار مجوز درایو را تأیید کند:</div>
+          <ol class="drv-auth-steps">
+            <li>فایل <b>گوگل شیت</b> اصلی سامانه را باز کنید.</li>
+            <li>از منوی بالای شیت روی <b>«سامانه QC مستقل ← اتصال و صدور مجوز گوگل درایو (بکاپ خودکار)»</b> کلیک کنید.</li>
+            <li>در پنجره‌ی مجوز گوگل، دسترسی به گوگل درایو را تأیید (<b>Allow</b>) کنید و سپس دکمه‌ی زیر را بزنید.</li>
+          </ol>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn primary" id="drvRecheckBtn"><i class="fa-solid fa-rotate"></i> بررسی مجدد اتصال</button>
+          </div>
+        </div>
+      `;
+      $('#drvRecheckBtn', body).addEventListener('click', () => loadDriveBackups(true));
+      return;
+    }
+
+    const cfg = st.config || {};
+    const isGoogle = st.provider === 'google-drive';
+
+    if (!st.connected) {
+      badge.className = 'badge soft';
+      badge.textContent = 'متصل نیست';
+      body.innerHTML = `
+        <div class="note" style="margin:0"><i class="fa-solid fa-cloud-arrow-up"></i>
+          <span>${isGoogle
+            ? 'با فعال‌سازی این بخش، سامانه به پوشه‌ی اختصاصی شما در <b>گوگل درایو</b> متصل می‌شود، به‌صورت دوره‌ای بکاپ کامل (نسخه ۴) ذخیره می‌کند و می‌توانید هر نسخه را همین‌جا بررسی یا بازگردانی کنید.'
+            : 'در این محیط سرور محلی، بکاپ‌های خودکار در پوشه‌ی آرشیو سرور ذخیره می‌شوند و در نسخه <b>Google Apps Script</b> دقیقاً با همین رابط کاربری به <b>گوگل درایو</b> متصل خواهد شد.'}</span>
+        </div>
+        <div class="drv-cfg-panel">
+          ${scheduleFormHtml(cfg, true)}
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <button class="btn primary" id="drvConnectBtn"><i class="fa-brands fa-google-drive"></i> ${isGoogle ? 'درخواست اتصال به گوگل درایو و فعال‌سازی بکاپ خودکار' : 'اتصال و فعال‌سازی بکاپ خودکار'}</button>
+          </div>
+        </div>
+      `;
+      bindScheduleVisibility(body);
+      $('#drvConnectBtn', body).addEventListener('click', async () => {
+        const btn = $('#drvConnectBtn', body);
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> در حال برقراری اتصال…';
+        try {
+          const payload = Object.assign(readScheduleForm(body), {
+            takeInitialBackup: !!($('#drvInitSnap', body) && $('#drvInitSnap', body).checked)
+          });
+          const res = await api.post('/api/drive-backups/connect', payload);
+          if (!root.isConnected) return;
+          if (res && res.needsAuthorization) {
+            renderDriveBackups(res);
+            toast.info('لطفاً مجوز گوگل درایو را از منوی شیت تأیید کنید');
+            return;
+          }
+          toast.success(isGoogle ? 'اتصال به گوگل درایو با موفقیت برقرار شد' : 'آرشیو بکاپ خودکار فعال شد');
+          driveCfgOpen = false;
+          renderDriveBackups(res);
+        } catch (e) {
+          toast.error(e.message || 'خطا در اتصال');
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-brands fa-google-drive"></i> تلاش مجدد اتصال';
+        }
+      });
+      return;
+    }
+
+    badge.className = 'badge good';
+    badge.textContent = isGoogle ? 'متصل به گوگل درایو' : 'بکاپ خودکار سرور فعال';
+    const backups = Array.isArray(st.backups) ? st.backups : [];
+
+    const tableRows = backups.map((b) => {
+      const trig = DRV_TRIG_META[b.trigger] || DRV_TRIG_META.manual;
+      return `<tr>
+        <td>
+          <div style="font-weight:700">${fmtIsoJalali(b.createdAt)}</div>
+          <span class="badge ${trig.cls}" style="margin-top:3px"><i class="fa-solid ${trig.icon}"></i> ${trig.label}</span>
+        </td>
+        <td>
+          <div dir="ltr" style="font-family:monospace;font-size:11.5px;text-align:right">${esc(b.name)}</div>
+          ${b.note ? `<div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(b.note)}</div>` : ''}
+          <div style="font-size:11px;color:var(--muted);margin-top:2px">حجم: ${fmtBytes(b.size)}</div>
+        </td>
+        <td>${countChipsHtml(b.counts)}</td>
+        <td>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button type="button" class="btn soft sm" data-drv-inspect="${esc(b.id)}" title="مشاهده و مقایسه محتوا"><i class="fa-solid fa-eye"></i> مشاهده</button>
+            <button type="button" class="btn primary sm" data-drv-restore="${esc(b.id)}" title="بازگردانی از این بکاپ"><i class="fa-solid fa-rotate-left"></i> بازگردانی</button>
+            <button type="button" class="btn ghost sm" data-drv-dl="${esc(b.id)}" title="دانلود JSON"><i class="fa-solid fa-download"></i></button>
+            <button type="button" class="btn danger-soft sm" data-drv-del="${esc(b.id)}" title="حذف از درایو"><i class="fa-solid fa-trash-can"></i></button>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+
+    body.innerHTML = `
+      <div class="drv-bar">
+        <div class="drv-meta">
+          <span class="drv-meta-item"><i class="fa-solid fa-folder-open"></i> پوشه: <b>${esc(cfg.folderName || 'پشتیبان‌گیری سامانه QC')}</b>
+            ${cfg.folderUrl ? `<a href="${esc(cfg.folderUrl)}" target="_blank" rel="noopener" class="badge info" style="text-decoration:none;margin-inline-start:4px"><i class="fa-solid fa-arrow-up-right-from-square"></i> بازکردن در درایو</a>` : ''}
+          </span>
+          <span class="drv-meta-item"><i class="fa-solid fa-clock"></i> زمان‌بندی: <b>${schedSummary(cfg)}</b>${st.triggerActive ? ' <span class="badge good">فعال</span>' : ''}</span>
+          <span class="drv-meta-item"><i class="fa-solid fa-layer-group"></i> نگهداری: <b>${fa(cfg.maxKeep || 30)} نسخه آخر</b></span>
+          <span class="drv-meta-item"><i class="fa-solid fa-check-double"></i> آخرین بکاپ: <b>${fmtIsoJalali(cfg.lastBackupAt)}</b></span>
+        </div>
+      </div>
+      ${cfg.lastError ? `<div class="note" style="margin:0;background:var(--bad-soft);color:var(--bad)"><i class="fa-solid fa-triangle-exclamation"></i> خطای آخرین اجرای خودکار: ${esc(cfg.lastError)}</div>` : ''}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input class="input" id="drvNoteInp" style="flex:1;min-width:190px;max-width:340px" placeholder="یادداشت اختیاری برای بکاپ فوری (مثلاً: پیش از بستن ماه)…">
+        <button class="btn primary" id="drvNowBtn"><i class="fa-solid fa-cloud-arrow-up"></i> بکاپ فوری الان</button>
+        <button class="btn soft" id="drvToggleCfgBtn"><i class="fa-solid fa-sliders"></i> تنظیمات زمان‌بندی</button>
+        <button class="btn ghost" id="drvRefreshBtn"><i class="fa-solid fa-arrows-rotate"></i> بروزرسانی لیست</button>
+        <button class="btn danger-soft" id="drvDisconnectBtn"><i class="fa-solid fa-link-slash"></i> قطع اتصال</button>
+      </div>
+      <div class="drv-cfg-panel" id="drvCfgPanel" style="${driveCfgOpen ? '' : 'display:none'}">
+        ${scheduleFormHtml(cfg, false)}
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" id="drvSaveCfgBtn"><i class="fa-solid fa-floppy-disk"></i> ذخیره تنظیمات زمان‌بندی</button>
+          <button class="btn ghost" id="drvCloseCfgBtn">بستن</button>
+        </div>
+      </div>
+      <div id="drvListWrap">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <div style="font-weight:700;font-size:13px">آرشیو بکاپ‌های ذخیره‌شده (${fa(backups.length)} نسخه)</div>
+          <div style="font-size:11.5px;color:var(--muted)">برای بررسی رکوردها و مقایسه با دیتای فعلی روی «مشاهده» کلیک کنید</div>
+        </div>
+        ${backups.length
+          ? `<div class="table-wrap"><table class="tbl"><thead><tr><th style="width:175px">زمان و نوع</th><th>فایل و توضیحات</th><th>محتوای بکاپ</th><th style="width:240px">عملیات</th></tr></thead><tbody>${tableRows}</tbody></table></div>`
+          : '<div class="empty-state" style="padding:20px">هنوز بکاپی در این پوشه ذخیره نشده است. روی «بکاپ فوری الان» کلیک کنید.</div>'}
+      </div>
+    `;
+
+    bindScheduleVisibility(body);
+
+    $('#drvNowBtn', body).addEventListener('click', async () => {
+      const btn = $('#drvNowBtn', body);
+      const note = ($('#drvNoteInp', body).value || '').trim();
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> در حال ذخیره بکاپ…';
+      try {
+        const res = await api.post('/api/drive-backups/now', { note, trigger: 'manual' });
+        if (!root.isConnected) return;
+        if (res && res.needsAuthorization) { renderDriveBackups(res); return; }
+        toast.success('بکاپ کامل با موفقیت ذخیره شد' + (res.pruned ? ` (${fa(res.pruned)} نسخه قدیمی پاک‌سازی شد)` : ''));
+        if (res.status) renderDriveBackups(res.status); else await loadDriveBackups();
+      } catch (e) {
+        toast.error(e.message || 'خطا در ثبت بکاپ');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> بکاپ فوری الان';
+      }
+    });
+
+    $('#drvToggleCfgBtn', body).addEventListener('click', () => {
+      driveCfgOpen = !driveCfgOpen;
+      const p = $('#drvCfgPanel', body);
+      if (p) p.style.display = driveCfgOpen ? '' : 'none';
+    });
+    $('#drvCloseCfgBtn', body).addEventListener('click', () => {
+      driveCfgOpen = false;
+      const p = $('#drvCfgPanel', body);
+      if (p) p.style.display = 'none';
+    });
+    $('#drvSaveCfgBtn', body).addEventListener('click', async () => {
+      const btn = $('#drvSaveCfgBtn', body);
+      btn.disabled = true;
+      try {
+        const res = await api.put('/api/drive-backups/config', readScheduleForm(body));
+        if (!root.isConnected) return;
+        driveCfgOpen = false;
+        toast.success('تنظیمات زمان‌بندی ذخیره شد');
+        renderDriveBackups(res);
+      } catch (e) {
+        toast.error(e.message || 'خطا در ذخیره تنظیمات');
+        btn.disabled = false;
+      }
+    });
+    $('#drvRefreshBtn', body).addEventListener('click', () => loadDriveBackups(true));
+    $('#drvDisconnectBtn', body).addEventListener('click', () => {
+      confirmDlg('قطع اتصال بکاپ درایو',
+        'زمان‌بندی بکاپ خودکار متوقف می‌شود. فایل‌های بکاپی که تاکنون در گوگل درایو ذخیره شده‌اند پاک نخواهند شد.',
+        async () => {
+          try {
+            const res = await api.post('/api/drive-backups/disconnect', {});
+            if (!root.isConnected) return;
+            driveCfgOpen = false;
+            toast.info('اتصال بکاپ خودکار قطع شد');
+            renderDriveBackups(res);
+          } catch (e) { toast.error(e.message); }
+        },
+        'قطع اتصال'
+      );
+    });
+
+    const byId = new Map(backups.map((b) => [b.id, b]));
+    $$('[data-drv-inspect]', body).forEach((el) => el.addEventListener('click', () => openDriveInspectModal(byId.get(el.dataset.drvInspect))));
+    $$('[data-drv-restore]', body).forEach((el) => el.addEventListener('click', () => openDriveRestoreModal(byId.get(el.dataset.drvRestore))));
+    $$('[data-drv-dl]', body).forEach((el) => el.addEventListener('click', () => downloadDriveBackup(byId.get(el.dataset.drvDl))));
+    $$('[data-drv-del]', body).forEach((el) => el.addEventListener('click', () => {
+      const item = byId.get(el.dataset.drvDel);
+      if (!item) return;
+      confirmDlg('حذف فایل بکاپ',
+        `فایل «${esc(item.name)}» به سطل زباله منتقل شود؟`,
+        async () => {
+          try {
+            const res = await api.del('/api/drive-backups/' + encodeURIComponent(item.id));
+            if (!root.isConnected) return;
+            toast.success('بکاپ حذف شد');
+            if (res && res.status) renderDriveBackups(res.status); else await loadDriveBackups();
+          } catch (e) { toast.error(e.message); }
+        },
+        'بله، حذف شود'
+      );
+    }));
+  }
+
+  async function loadDriveBackups(showToast) {
+    try {
+      const st = await api.get('/api/drive-backups');
+      if (!root.isConnected) return;
+      renderDriveBackups(st);
+      if (showToast) toast.info('فهرست بکاپ‌ها بروزرسانی شد');
+    } catch (e) {
+      if (!root.isConnected) return;
+      const badge = $('#drvStatusBadge', root);
+      const body = $('#drvBody', root);
+      if (badge) { badge.className = 'badge bad'; badge.textContent = 'خطا'; }
+      if (body) body.innerHTML = `<div class="note" style="margin:0;color:var(--bad)">${esc(e.message || 'خطا در دریافت وضعیت بکاپ درایو')}</div>`;
+    }
+  }
+
   App.onDateRangeChange(async () => { await loadStatus(); await loadFiles(); });
   await loadStatus();
   await loadFiles();
+  loadDriveBackups();
 }
 
 App.register('data', { title: 'مرکز داده', render });

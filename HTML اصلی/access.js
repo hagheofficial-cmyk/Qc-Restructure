@@ -30,7 +30,7 @@ const SHARED_ROUTES = ['dashboard', 'tickets', 'tickets-new', 'socials', 'social
 
 /* اندپوینت‌هایی که همیشه مخصوص مدیرند (بدون توجه به نقش درخواست‌کننده). */
 const ADMIN_API = ['/api/criteria', '/api/settings', '/api/qc-users', '/api/fiscal-months', '/api/elements',
-  '/api/backup', '/api/demo', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
+  '/api/backup', '/api/drive-backups', '/api/demo', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
   '/api/action-types', '/api/agents'];
 
 /* خواندن‌هایی که برای صفحه‌های عملیاتیِ کارشناس QC لازم‌اند (با داده‌ی محدودشده)؛

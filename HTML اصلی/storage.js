@@ -436,6 +436,12 @@ function dispatch(method, url, body) {
     X.ensure(db);
     saveDb(); return clone(result);
   }
+  if (name === 'drive-backups') {
+    if (method === 'GET') {
+      return { supported: false, provider: 'offline', connected: false, needsAuthorization: false, config: {}, backups: [] };
+    }
+    bad('اتصال مستقیم به گوگل درایو فقط در نسخه Apps Script یا سرور فعال است.', 400);
+  }
   if (name === 'monthly-scores') {
     if (!Array.isArray(db.monthlyScores)) db.monthlyScores = [];
     if (id == null && method === 'GET') {

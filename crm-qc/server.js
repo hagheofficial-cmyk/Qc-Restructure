@@ -597,6 +597,11 @@ async function dispatchApi(req, res, pathname, query, body, session) {
     saveStore(); return ok(res, result);
   }
 
+  /* ---- بکاپ خودکار و مشاهده/بازگردانی (در نسخه Node روی پوشه data/drive-backups و در Apps Script روی گوگل درایو) ---- */
+  if (pathname === '/api/drive-backups' || pathname.startsWith('/api/drive-backups/')) {
+    return handleNodeDriveBackups(res, method, pathname, body);
+  }
+
   /* دیتای نمونه — برای تست سریع UI */
   if (pathname === '/api/demo' && method === 'POST') {
     const agents = db.agents.filter((a) => a.active);
@@ -1274,7 +1279,278 @@ server.listen(PORT, '0.0.0.0', () => {
   CallWatcher.start(db, () => saveStore());
   // راه‌اندازی همگام‌سازی گوگل شیت (اگر فعال باشد)
   try { Sheets.startPolling(db, () => saveStore()); } catch(e) { console.warn('[sheets] start:', e.message); }
+  try { syncNodeDriveTimer(); } catch(e) { console.warn('[drive-backup] timer:', e.message); }
 });
+
+/* ---- پیاده‌سازی هم‌ارز بکاپ خودکار/مشاهده/بازگردانی در محیط Node.js ---- */
+const NODE_BACKUP_DIR = path.join(DATA_DIR, 'drive-backups');
+const NODE_BACKUP_CFG_FILE = path.join(NODE_BACKUP_DIR, '_config.json');
+let nodeBackupTimer = null;
+
+function defaultNodeDriveCfg() {
+  return {
+    connected: false,
+    folderId: 'local-archive',
+    folderName: 'پشتیبان‌گیری سامانه QC',
+    folderUrl: '',
+    schedule: 'daily',
+    hour: 2,
+    dayOfWeek: 5,
+    maxKeep: 30,
+    lastBackupAt: '',
+    lastBackupId: '',
+    lastBackupName: '',
+    lastTrigger: '',
+    lastError: ''
+  };
+}
+function loadNodeDriveCfg() {
+  const base = defaultNodeDriveCfg();
+  try {
+    if (fs.existsSync(NODE_BACKUP_CFG_FILE)) Object.assign(base, JSON.parse(fs.readFileSync(NODE_BACKUP_CFG_FILE, 'utf8')) || {});
+  } catch (e) {}
+  return base;
+}
+function saveNodeDriveCfg(cfg) {
+  const clean = Object.assign(defaultNodeDriveCfg(), cfg || {});
+  clean.hour = Math.max(0, Math.min(23, Number(clean.hour) || 0));
+  clean.dayOfWeek = Math.max(1, Math.min(7, Number(clean.dayOfWeek) || 5));
+  clean.maxKeep = Math.max(5, Math.min(200, Number(clean.maxKeep) || 30));
+  if (!['off', '6h', '12h', 'daily', 'weekly'].includes(clean.schedule)) clean.schedule = 'daily';
+  fs.mkdirSync(NODE_BACKUP_DIR, { recursive: true });
+  fs.writeFileSync(NODE_BACKUP_CFG_FILE, JSON.stringify(clean, null, 2), 'utf8');
+  return clean;
+}
+function nodeBackupCounts(obj) {
+  obj = obj || {};
+  let actions = 0;
+  Object.values(obj.agentActions || {}).forEach((arr) => { if (Array.isArray(arr)) actions += arr.length; });
+  return {
+    agents: (obj.agents || []).length,
+    tickets: (obj.tickets || []).length,
+    socials: (obj.socials || []).length,
+    calls: (obj.callFeedbacks || []).length,
+    callSituational: (obj.callSituational || []).length,
+    monthlyScores: (obj.monthlyScores || []).length,
+    actions,
+    reminders: (obj.reminders || []).length,
+    fiscalMonths: (obj.fiscalMonths || []).length,
+    qcUsers: (obj.qcUsers || []).length
+  };
+}
+function nodeBackupPeriod(obj) {
+  let minD = '', maxD = '';
+  const chk = (d) => { const s = String(d || '').trim(); if (!/^\d{4}\/\d{2}\/\d{2}$/.test(s)) return; if (!minD || s < minD) minD = s; if (!maxD || s > maxD) maxD = s; };
+  (obj.tickets || []).forEach((r) => chk(r && r.reviewDate));
+  (obj.socials || []).forEach((r) => chk(r && r.reviewDate));
+  (obj.callFeedbacks || []).forEach((r) => chk(r && r.reviewDate));
+  (obj.callSituational || []).forEach((r) => { chk(r && r.periodFrom); chk(r && r.periodTo); });
+  (obj.monthlyScores || []).forEach((r) => { chk(r && r.periodFrom); chk(r && r.periodTo); });
+  return { from: minD || null, to: maxD || null };
+}
+function buildNodeFullBackup() {
+  return {
+    schema: 'crm-qc-backup', version: 4, datasetId: db.datasetId, exportedAt: new Date().toISOString(),
+    range: { from: null, to: null },
+    settings: db.settings, lists: db.lists || {}, agents: db.agents, qcAgents: db.qcAgents,
+    qcUsers: db.qcUsers || [], fiscalMonths: db.fiscalMonths || [], elements: db.elements || [],
+    agentActions: db.agentActions || {}, actionTypes: ExpertRef.actionTypes(db), reminders: ExpertRef.reminderList(db),
+    tickets: db.tickets || [], socials: db.socials || [], callFeedbacks: db.callFeedbacks || [],
+    callSituational: db.callSituational || [], monthlyScores: db.monthlyScores || [], callImport: db.callImport || null
+  };
+}
+function safeNodeBackupPath(id) {
+  const clean = path.basename(String(id || '').trim());
+  if (!/^qc-backup-[a-zA-Z0-9._-]+\.json$/.test(clean)) return null;
+  const full = path.join(NODE_BACKUP_DIR, clean);
+  if (!full.startsWith(NODE_BACKUP_DIR + path.sep)) return null;
+  return { id: clean, filePath: full, metaPath: full + '.meta.json' };
+}
+function listNodeBackups() {
+  if (!fs.existsSync(NODE_BACKUP_DIR)) return [];
+  const files = fs.readdirSync(NODE_BACKUP_DIR).filter((f) => /^qc-backup-.*\.json$/.test(f) && !f.endsWith('.meta.json'));
+  return files.map((name) => {
+    const fp = path.join(NODE_BACKUP_DIR, name);
+    const mp = fp + '.meta.json';
+    const st = fs.statSync(fp);
+    let meta = {};
+    try { if (fs.existsSync(mp)) meta = JSON.parse(fs.readFileSync(mp, 'utf8')) || {}; } catch (e) {}
+    return {
+      id: name, name, createdAt: meta.createdAt || st.mtime.toISOString(), size: st.size,
+      trigger: meta.trigger || 'manual', note: meta.note || '', version: meta.version || 4,
+      period: meta.period || { from: null, to: null }, counts: meta.counts || null,
+      url: '', downloadUrl: ''
+    };
+  }).sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+function writeNodeBackup(cfg, trigger, note) {
+  fs.mkdirSync(NODE_BACKUP_DIR, { recursive: true });
+  const payload = buildNodeFullBackup();
+  const counts = nodeBackupCounts(payload);
+  const period = nodeBackupPeriod(payload);
+  const j = Calc.todayJalali();
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const tag = String(trigger || 'manual').replace(/[^a-z0-9_-]/gi, '') || 'manual';
+  const name = `qc-backup-${j.jy}-${pad(j.jm)}-${pad(j.jd)}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}-${tag}.json`;
+  const fp = path.join(NODE_BACKUP_DIR, name);
+  const jsonStr = JSON.stringify(payload);
+  fs.writeFileSync(fp, jsonStr, 'utf8');
+  const meta = {
+    schema: 'crm-qc-backup', version: 4, createdAt: payload.exportedAt,
+    trigger: tag, note: String(note || '').trim().slice(0, 200), counts, period
+  };
+  fs.writeFileSync(fp + '.meta.json', JSON.stringify(meta), 'utf8');
+  cfg.lastBackupAt = payload.exportedAt;
+  cfg.lastBackupId = name;
+  cfg.lastBackupName = name;
+  cfg.lastTrigger = tag;
+  cfg.lastError = '';
+  saveNodeDriveCfg(cfg);
+  const all = listNodeBackups();
+  let pruned = 0;
+  for (let i = cfg.maxKeep; i < all.length; i++) {
+    try {
+      fs.unlinkSync(path.join(NODE_BACKUP_DIR, all[i].name));
+      const mp = path.join(NODE_BACKUP_DIR, all[i].name + '.meta.json');
+      if (fs.existsSync(mp)) fs.unlinkSync(mp);
+      pruned++;
+    } catch (e) {}
+  }
+  return {
+    backup: { id: name, name, createdAt: payload.exportedAt, size: Buffer.byteLength(jsonStr, 'utf8'), trigger: tag, note: meta.note, version: 4, period, counts, url: '', downloadUrl: '' },
+    pruned
+  };
+}
+function syncNodeDriveTimer() {
+  if (nodeBackupTimer) { clearInterval(nodeBackupTimer); nodeBackupTimer = null; }
+  const cfg = loadNodeDriveCfg();
+  if (!cfg.connected || cfg.schedule === 'off') return;
+  const msMap = { '6h': 6 * 3600e3, '12h': 12 * 3600e3, daily: 24 * 3600e3, weekly: 7 * 24 * 3600e3 };
+  const every = msMap[cfg.schedule] || 24 * 3600e3;
+  nodeBackupTimer = setInterval(() => {
+    try {
+      const c = loadNodeDriveCfg();
+      if (!c.connected || c.schedule === 'off') return;
+      const lastMs = c.lastBackupAt ? Date.parse(c.lastBackupAt) : 0;
+      if (!lastMs || (Date.now() - lastMs) >= every - 60000) {
+        writeNodeBackup(c, 'auto', 'بکاپ خودکار زمان‌بندی‌شده');
+      }
+    } catch (e) {}
+  }, 15 * 60 * 1000);
+  if (nodeBackupTimer.unref) nodeBackupTimer.unref();
+}
+function nodeDriveStatus(cfg, includeList) {
+  return {
+    supported: true,
+    provider: 'local-server',
+    connected: !!cfg.connected,
+    needsAuthorization: false,
+    authError: '',
+    config: cfg,
+    triggerActive: !!(cfg.connected && cfg.schedule !== 'off'),
+    backups: (cfg.connected && includeList !== false) ? listNodeBackups() : []
+  };
+}
+function handleNodeDriveBackups(res, method, pathname, body) {
+  let cfg = loadNodeDriveCfg();
+  const sub = pathname.slice('/api/drive-backups'.length).replace(/^\/+/, '');
+  const segs = sub ? sub.split('/').map((s) => { try { return decodeURIComponent(s); } catch (e) { return s; } }) : [];
+
+  if (method === 'GET' && !segs.length) return ok(res, nodeDriveStatus(cfg, true));
+  if (method === 'POST' && segs.length === 1 && segs[0] === 'connect') {
+    cfg.connected = true;
+    if (body.folderName) cfg.folderName = String(body.folderName).trim() || cfg.folderName;
+    if (body.schedule) cfg.schedule = String(body.schedule);
+    if (body.hour != null && body.hour !== '') cfg.hour = Number(body.hour);
+    if (body.dayOfWeek != null && body.dayOfWeek !== '') cfg.dayOfWeek = Number(body.dayOfWeek);
+    if (body.maxKeep != null && body.maxKeep !== '') cfg.maxKeep = Number(body.maxKeep);
+    cfg = saveNodeDriveCfg(cfg);
+    syncNodeDriveTimer();
+    const initial = body.takeInitialBackup !== false ? writeNodeBackup(cfg, 'connect', 'بکاپ اولیه هنگام اتصال') : null;
+    const st = nodeDriveStatus(cfg, true);
+    st.ok = true; st.initialBackup = initial ? initial.backup : null;
+    return ok(res, st);
+  }
+  if (method === 'PUT' && segs.length === 1 && segs[0] === 'config') {
+    if (!cfg.connected) return bad(res, 'ابتدا اتصال را برقرار کنید.', 400);
+    if (body.folderName) cfg.folderName = String(body.folderName).trim() || cfg.folderName;
+    if (body.schedule != null) cfg.schedule = String(body.schedule);
+    if (body.hour != null && body.hour !== '') cfg.hour = Number(body.hour);
+    if (body.dayOfWeek != null && body.dayOfWeek !== '') cfg.dayOfWeek = Number(body.dayOfWeek);
+    if (body.maxKeep != null && body.maxKeep !== '') cfg.maxKeep = Number(body.maxKeep);
+    cfg = saveNodeDriveCfg(cfg);
+    syncNodeDriveTimer();
+    const st = nodeDriveStatus(cfg, true); st.ok = true;
+    return ok(res, st);
+  }
+  if (method === 'POST' && segs.length === 1 && segs[0] === 'disconnect') {
+    cfg.connected = false;
+    cfg = saveNodeDriveCfg(cfg);
+    syncNodeDriveTimer();
+    const st = nodeDriveStatus(cfg, false); st.ok = true;
+    return ok(res, st);
+  }
+  if (method === 'POST' && segs.length === 1 && segs[0] === 'now') {
+    if (!cfg.connected) return bad(res, 'ابتدا اتصال را برقرار کنید.', 400);
+    const written = writeNodeBackup(cfg, body.trigger || 'manual', body.note || '');
+    return ok(res, { ok: true, backup: written.backup, pruned: written.pruned, status: nodeDriveStatus(cfg, true) });
+  }
+  if (segs.length >= 1) {
+    const ref = safeNodeBackupPath(segs[0]);
+    if (!ref || !fs.existsSync(ref.filePath)) return bad(res, 'فایل بکاپ یافت نشد.', 404);
+    if (method === 'DELETE' && segs.length === 1) {
+      fs.unlinkSync(ref.filePath);
+      if (fs.existsSync(ref.metaPath)) fs.unlinkSync(ref.metaPath);
+      return ok(res, { ok: true, deletedId: ref.id, status: nodeDriveStatus(cfg, true) });
+    }
+    const backupObj = JSON.parse(fs.readFileSync(ref.filePath, 'utf8'));
+    const entry = listNodeBackups().find((x) => x.id === ref.id) || { id: ref.id, name: ref.id, createdAt: backupObj.exportedAt, size: 0 };
+    if (method === 'GET' && segs.length === 1) {
+      const counts = nodeBackupCounts(backupObj);
+      const liveCounts = nodeBackupCounts(db);
+      const diff = {};
+      Object.keys(counts).forEach((k) => { diff[k] = { backup: counts[k], live: liveCounts[k] || 0, delta: counts[k] - (liveCounts[k] || 0) }; });
+      const flatActions = [];
+      Object.entries(backupObj.agentActions || {}).forEach(([agent, list]) => (list || []).forEach((a) => flatActions.push(Object.assign({ agent }, a))));
+      flatActions.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+      const cap = 400;
+      const tickets = (backupObj.tickets || []).slice().sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+      const socials = (backupObj.socials || []).slice().sort((a, b) => Number(b.id || 0) - Number(a.id || 0));
+      const calls = (backupObj.callFeedbacks || []).slice().sort((a, b) => String(b.reviewDate || '').localeCompare(String(a.reviewDate || '')));
+      const safeUsers = Access.userMask(Access.normalizeUsers({ qcUsers: backupObj.qcUsers || [] }));
+      return ok(res, {
+        ok: true, item: entry, exportedAt: backupObj.exportedAt, version: backupObj.version || 4,
+        period: nodeBackupPeriod(backupObj), counts, liveCounts, diff,
+        preview: {
+          agents: (backupObj.agents || []).slice(0, 500), tickets: tickets.slice(0, cap), socials: socials.slice(0, cap),
+          calls: calls.slice(0, cap), callSituational: (backupObj.callSituational || []).slice(0, cap),
+          monthlyScores: (backupObj.monthlyScores || []).slice(0, cap), actions: flatActions.slice(0, cap),
+          reminders: (backupObj.reminders || []).slice(0, cap), fiscalMonths: backupObj.fiscalMonths || [],
+          qcUsers: safeUsers,
+          settings: { orgName: backupObj.settings && backupObj.settings.orgName || '', slaMinutes: backupObj.settings && backupObj.settings.slaMinutes,
+            ticketWeights: backupObj.settings && backupObj.settings.ticketWeights, socialWeights: backupObj.settings && backupObj.settings.socialWeights }
+        },
+        truncated: { tickets: Math.max(0, tickets.length - cap), socials: Math.max(0, socials.length - cap), calls: Math.max(0, calls.length - cap), actions: Math.max(0, flatActions.length - cap) }
+      });
+    }
+    if (method === 'GET' && segs.length === 2 && segs[1] === 'download') {
+      return ok(res, { ok: true, filename: ref.id, url: '', downloadUrl: '', backup: backupObj });
+    }
+    if (method === 'POST' && segs.length === 2 && segs[1] === 'restore') {
+      const mode = body.mode === 'append' ? 'append' : 'replace';
+      let safetyBackup = null;
+      if (body.autoSafetyBackup !== false) {
+        safetyBackup = writeNodeBackup(cfg, 'pre-restore', 'بکاپ ایمنی خودکار پیش از بازگردانی ' + ref.id).backup;
+      }
+      const restored = ImportData.restore(db, backupObj, mode);
+      ExpertRef.ensure(db);
+      saveStore();
+      return ok(res, { ok: true, mode, restored, safetyBackup });
+    }
+  }
+  return notFound(res);
+}
 
 process.on('SIGINT', () => { saveStore(true); process.exit(0); });
 process.on('SIGTERM', () => { saveStore(true); process.exit(0); });
