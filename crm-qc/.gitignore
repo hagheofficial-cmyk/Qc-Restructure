@@ -1,0 +1,20 @@
+# دیتای زمان اجرا (store) — ریستور می‌شود نه کامیت
+data/store.json
+data/store.json.tmp
+# secrets and private Google Sheets connection settings
+data/sheets-config.json
+data/sheets-config.json.tmp
+data/sheets-credentials*.json
+data/*service-account*.json
+node_modules/
+node_modules
+*.log
+# پوشه دیتای تماس
+data/calls/*
+!data/calls/.gitkeep
+!data/calls/README.md
+# خروجی بزرگ build آفلاین (همه‌چیز inline) — با npm run build:apps-script:offline ساخته می‌شود
+apps-script-full/offline/
+
+# User-specific Apps Script project settings
+.clasp.json

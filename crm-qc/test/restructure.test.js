@@ -1,0 +1,1364 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const vm = require('node:vm');
+const { spawn } = require('node:child_process');
+const XLSX = require('xlsx');
+
+const C = require('../shared/calc');
+const P = require('../shared/parseQc');
+const R = require('../shared/reports');
+const I = require('../shared/importData');
+const E = require('../shared/expertRef');
+const F = require('../shared/fiscal');
+const Sheets = require('../googleSheets');
+const Watcher = require('../callWatcher');
+const { ROOT, browser, clone, fixture, settle, go } = require('./helpers');
+
+const SAMPLES_DIR = path.resolve(ROOT, '..', 'نمونه اکسل ها');
+function findSample(prefix) {
+  const match = fs.readdirSync(SAMPLES_DIR).find(f => f.startsWith(prefix) && f.endsWith('.xlsx'));
+  assert.ok(match, `Missing sample workbook starting with ${prefix} in ${SAMPLES_DIR}`);
+  return match;
+}
+const FILES = {
+  accFixed: findSample('qc_acc_new_form'),
+  accSit: findSample('new_acc_form___score_calc'),
+  teleFixed: findSample('qc_tele_new_form'),
+  teleSit: findSample('new_tele_form___score_calc')
+};
+
+function readSampleRows(key) {
+  const wb = XLSX.readFile(path.join(SAMPLES_DIR, FILES[key]), { raw: true });
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+}
+
+function makeSeedDb() {
+  const seed = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/seed.json'), 'utf8'));
+  return {
+    ...seed,
+    tickets: [],
+    socials: [],
+    callFeedbacks: [],
+    callSituational: [],
+    callImport: null,
+    callRaw: null,
+    callSync: { files: {}, syncedAt: null },
+    agentActions: {},
+    reminders: [],
+    fiscalMonths: [],
+    qcUsers: [],
+    settings: { ...seed.settings, defaultPreset: 'all' }
+  };
+}
+
+test('restructure: exact fixed + situational criteria counts and labels match guide', () => {
+  assert.equal(P.ACCOUNT_CRITERIA.length, 11);
+  assert.equal(P.TELE_CRITERIA.length, 10);
+  assert.equal(P.MLM_CRITERIA.length, 11);
+  assert.equal(P.situationalDefaults('account').length, 4);
+  assert.equal(P.situationalDefaults('tele').length, 7);
+  assert.equal(P.situationalDefaults('mlm').length, 0);
+
+  assert.ok(P.ACCOUNT_CRITERIA.includes('call_topic_mastery'));
+  assert.ok(!P.TELE_CRITERIA.includes('call_topic_mastery'));
+  assert.equal(P.labelOf('account', 'call_opening_quality'), 'شروع به‌موقع مکالمه');
+  assert.equal(P.labelOf('tele', 'call_opening_quality'), 'شروع مناسب مکالمه');
+  assert.equal(P.labelOf('tele', 'value_communication_and_tailored_offer'), 'انتقال ارزش و ارائه پیشنهاد متناسب');
+  assert.equal(P.situationalLabelOf('account', 'campaign_announcement'), 'اعلام جشنواره');
+  assert.equal(P.situationalLabelOf('tele', 'parallel_campaign_presentation'), 'اعلام جشنواره موازی');
+});
+
+test('restructure: all 4 real Metabase Excels parse, classify without filenames, and pair periods accurately', () => {
+  const accFixedRows = readSampleRows('accFixed');
+  const accSitRows = readSampleRows('accSit');
+  const teleFixedRows = readSampleRows('teleFixed');
+  const teleSitRows = readSampleRows('teleSit');
+
+  // Filename-less classification
+  assert.deepEqual(P.classifyCallFile('file1.xlsx', accFixedRows), { kind: 'fixed', formType: 'account' });
+  assert.deepEqual(P.classifyCallFile('file2.xlsx', accSitRows), { kind: 'situational', formType: 'account' });
+  assert.deepEqual(P.classifyCallFile('file3.xlsx', teleFixedRows), { kind: 'fixed', formType: 'tele' });
+  assert.deepEqual(P.classifyCallFile('file4.xlsx', teleSitRows), { kind: 'situational', formType: 'tele' });
+
+  const db = makeSeedDb();
+  // Upload situational BEFORE fixed to verify two-pass period auto-linking!
+  const res = I.callFiles(db, [
+    { name: FILES.accSit, rows: accSitRows },
+    { name: FILES.teleSit, rows: teleSitRows },
+    { name: FILES.accFixed, rows: accFixedRows },
+    { name: FILES.teleFixed, rows: teleFixedRows }
+  ]);
+
+  assert.equal(res.ok, true);
+  assert.equal(res.counts.total, 323 + 693);
+  assert.equal(res.counts.situational, 23 + 42);
+  assert.equal(db.callFeedbacks.length, 1016);
+  assert.equal(db.callSituational.length, 65);
+
+  const accCalls = db.callFeedbacks.filter(r => r.formType === 'account');
+  const teleCalls = db.callFeedbacks.filter(r => r.formType === 'tele');
+  assert.equal(accCalls.length, 323);
+  assert.equal(teleCalls.length, 693);
+  assert.equal(accCalls.filter(r => r.redline === 1).length, 3);
+  assert.equal(teleCalls.filter(r => r.redline === 1).length, 16);
+
+  // Every Account situational row linked to Account fixed date range (1405/07/25..1405/08/20)
+  const accSit = db.callSituational.filter(r => r.formType === 'account');
+  assert.equal(accSit.length, 23);
+  assert.ok(accSit.every(r => r.periodFrom === '1405/07/25' && r.periodTo === '1405/08/20'));
+  assert.ok(accSit.every(r => r.pairedFixedFile === FILES.accFixed));
+
+  // Every Tele situational row linked to Tele fixed date range (1405/07/25..1405/08/21)
+  const teleSit = db.callSituational.filter(r => r.formType === 'tele');
+  assert.equal(teleSit.length, 42);
+  assert.ok(teleSit.every(r => r.periodFrom === '1405/07/25' && r.periodTo === '1405/08/21'));
+  assert.ok(teleSit.every(r => r.pairedFixedFile === FILES.teleFixed));
+
+  // Idempotent re-upload
+  const again = I.callFiles(db, [
+    { name: FILES.accFixed, rows: accFixedRows },
+    { name: FILES.accSit, rows: accSitRows },
+    { name: FILES.teleFixed, rows: teleFixedRows },
+    { name: FILES.teleSit, rows: teleSitRows }
+  ]);
+  assert.equal(again.results.reduce((s, r) => s + (r.added || 0), 0), 0);
+  assert.equal(db.callFeedbacks.length, 1016);
+  assert.equal(db.callSituational.length, 65);
+});
+
+test('restructure: fixed vs situational scores stay strictly separate and match Score Calc math', () => {
+  const db = makeSeedDb();
+  I.callFiles(db, [
+    { name: FILES.accFixed, rows: readSampleRows('accFixed') },
+    { name: FILES.accSit, rows: readSampleRows('accSit') },
+    { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+    { name: FILES.teleSit, rows: readSampleRows('teleSit') }
+  ]);
+
+  const inRange = { from: '1405/07/25', to: '1405/08/21' };
+  const outRange = { from: '1405/01/01', to: '1405/02/01' };
+
+  // Weighted team situational averages match independent Python verification (Account: 74.20, Tele: 71.27)
+  const accRep = R.callReport(db, 'team', { ...inRange, form: 'account' }, P.resolver(db.settings.callCriteria));
+  assert.equal(accRep.situational.hasData, true);
+  assert.equal(accRep.situational.avgScore, 74.2);
+  assert.equal(accRep.situational.elements.length, 4);
+  assert.equal(accRep.elements.length, 11);
+
+  const teleRep = R.callReport(db, 'team', { ...inRange, form: 'tele' }, P.resolver(db.settings.callCriteria));
+  assert.equal(teleRep.situational.hasData, true);
+  assert.equal(teleRep.situational.avgScore, 71.27);
+  assert.equal(teleRep.situational.elements.length, 7);
+  assert.equal(teleRep.elements.length, 10);
+
+  // Verify individual specialist report card keeps fixed score and calc_situational_score exact & separate
+  const diffAccRaw = readSampleRows('accSit').find(r => Math.abs(Number(r.avg_score) - Number(r.calc_situational_score)) > 5);
+  assert.ok(diffAccRaw, 'Account specialist with distinct fixed vs situational scores');
+  const accProf = R.agentProfile(db, diffAccRaw.account_expert_name, inRange);
+  assert.ok(accProf, 'Account specialist profile resolved');
+  assert.equal(accProf.calls.count, Number(diffAccRaw.forms_count));
+  assert.equal(accProf.calls.avgScore, Math.round(Number(diffAccRaw.avg_score) * 100) / 100);
+  assert.equal(accProf.situational.hasData, true);
+  assert.equal(accProf.situational.avgScore, Math.round(Number(diffAccRaw.calc_situational_score) * 100) / 100);
+  assert.equal(accProf.situational.elements.length, 4);
+  // Fixed call avg is NOT polluted by situational score
+  assert.notEqual(accProf.calls.avgScore, accProf.situational.avgScore);
+
+  const diffTeleRaw = readSampleRows('teleSit').find(r => Math.abs(Number(r.avg_score) - Number(r.calc_situational_score)) > 5);
+  assert.ok(diffTeleRaw, 'Tele specialist with distinct fixed vs situational scores');
+  const teleProf = R.agentProfile(db, diffTeleRaw.tele_expert_name, inRange);
+  assert.ok(teleProf, 'Tele specialist profile resolved');
+  assert.equal(teleProf.calls.count, Number(diffTeleRaw.forms_count));
+  assert.equal(teleProf.calls.avgScore, Math.round(Number(diffTeleRaw.avg_score) * 100) / 100);
+  assert.equal(teleProf.situational.hasData, true);
+  assert.equal(teleProf.situational.avgScore, Math.round(Number(diffTeleRaw.calc_situational_score) * 100) / 100);
+  assert.equal(teleProf.situational.elements.length, 7);
+
+  // Outside date range excludes situational rows cleanly
+  const outsideProf = R.agentProfile(db, diffAccRaw.account_expert_name, outRange);
+  assert.equal(outsideProf.situational.hasData, false);
+  assert.equal(outsideProf.situational.avgScore, '');
+
+  // Call analysis exposes situational KPIs + situationalHeatmaps
+  const an = R.callAnalysis(db, inRange, P.resolver(db.settings.callCriteria));
+  assert.equal(an.kpis.totalCalls, 1016);
+  assert.equal(an.kpis.situationalCount, 65);
+  assert.equal(an.situationalHeatmaps.account.agents.length, 23);
+  assert.equal(an.situationalHeatmaps.account.keys.length, 4);
+  assert.equal(an.situationalHeatmaps.tele.agents.length, 42);
+  assert.equal(an.situationalHeatmaps.tele.keys.length, 7);
+
+  // Expert ref and fiscal summary carry situational averages separately
+  const erCards = E.overview(db);
+  assert.ok(erCards.cards.some(c => c.situationalAvg !== ''));
+  db.fiscalMonths = [{ id: 'm1', label: 'آبان ۱۴۰۵', from: '1405/07/25', to: '1405/08/21' }];
+  const fm = F.monthlySummary(db, inRange);
+  assert.ok(fm.rows.some(r => r.situationalCount > 0 && r.situationalAvg !== ''));
+});
+
+test('restructure: callWatcher two-pass scan and Google Sheets Call_Situational round-trip', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-restructure-watch-'));
+  try {
+    const callsDir = path.join(tmpDir, 'data', 'calls');
+    fs.mkdirSync(callsDir, { recursive: true });
+    fs.cpSync(path.join(ROOT, 'shared'), path.join(tmpDir, 'shared'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'callWatcher.js'), path.join(tmpDir, 'callWatcher.js'));
+    fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(tmpDir, 'node_modules'), 'dir');
+    for (const fname of Object.values(FILES)) {
+      fs.copyFileSync(path.join(SAMPLES_DIR, fname), path.join(callsDir, fname));
+    }
+    const IsolatedWatcher = require(path.join(tmpDir, 'callWatcher.js'));
+    const db = makeSeedDb();
+    let saved = 0;
+    const out = IsolatedWatcher.scanOnce(db, () => { saved++; }, () => {});
+    assert.equal(out.changed, true);
+    assert.equal(saved, 1);
+    assert.equal(db.callFeedbacks.length, 1016);
+    assert.equal(db.callSituational.length, 65);
+
+    const status = IsolatedWatcher.dirStatus(db);
+    assert.equal(status.counts.situational, 65);
+    assert.equal(status.counts.total, 1016);
+    assert.equal(status.files.filter(f => f.kind === 'situational').length, 2);
+    assert.equal(status.files.filter(f => f.kind === 'form').length, 2);
+
+    // Google Sheets round-trip for Call_Situational
+    const sheetData = Sheets.dbToSheetRows(db);
+    assert.equal(sheetData.callSituational.length, 65);
+    const restored = Sheets.sheetRowsToDb(sheetData);
+    assert.equal(restored.callSituational.length, 65);
+    assert.equal(restored.callSituational[0].situationalScore, db.callSituational[0].situationalScore);
+    assert.deepEqual(restored.callSituational[0].elements, db.callSituational[0].elements);
+    assert.equal(restored.callSituational[0].periodFrom, db.callSituational[0].periodFrom);
+    assert.equal(restored.callSituational[0].periodTo, db.callSituational[0].periodTo);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('restructure: HTTP server and offline LocalApi produce identical results for paired real uploads', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-restructure-srv-'));
+  fs.mkdirSync(path.join(dir, 'data'));
+  fs.cpSync(path.join(ROOT, 'shared'), path.join(dir, 'shared'), { recursive: true });
+  for (const file of ['server.js', 'callWatcher.js', 'googleSheets.js']) fs.copyFileSync(path.join(ROOT, file), path.join(dir, file));
+  fs.writeFileSync(path.join(dir, 'data/seed.json'), JSON.stringify(makeSeedDb()));
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+  fs.symlinkSync(path.join(ROOT, 'public'), path.join(dir, 'public'), 'dir');
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: dir, env: { ...process.env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  t.after(async () => {
+    await new Promise((resolve) => { child.once('exit', resolve); child.kill('SIGTERM'); });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  let log = '';
+  child.stderr.on('data', (d) => { log += d; });
+  const baseUrl = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Server timeout: ' + log)); }, 10000);
+    child.stdout.on('data', (chunk) => {
+      log += chunk;
+      const m = log.match(/http:\/\/0\.0\.0\.0:(\d+)/);
+      if (m) { clearTimeout(timer); resolve('http://127.0.0.1:' + m[1]); }
+    });
+    child.once('exit', (code) => { clearTimeout(timer); reject(new Error('Server exited ' + code + '\n' + log)); });
+  });
+
+  const payload = {
+    files: [
+      { name: FILES.accFixed, rows: readSampleRows('accFixed') },
+      { name: FILES.accSit, rows: readSampleRows('accSit') },
+      { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+      { name: FILES.teleSit, rows: readSampleRows('teleSit') }
+    ]
+  };
+  const upRes = await fetch(baseUrl + '/api/calls/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+  }).then(r => r.json());
+  assert.equal(upRes.ok, true);
+  assert.equal(upRes.counts.total, 1016);
+  assert.equal(upRes.counts.situational, 65);
+
+  const rangeQ = 'from=1405%2F07%2F25&to=1405%2F08%2F21';
+  const [srvDash, srvRep, srvAn] = await Promise.all([
+    fetch(`${baseUrl}/api/dashboard?${rangeQ}`).then(r => r.json()),
+    fetch(`${baseUrl}/api/reports?type=call&level=team&${rangeQ}`).then(r => r.json()),
+    fetch(`${baseUrl}/api/calls/analysis?${rangeQ}`).then(r => r.json())
+  ]);
+
+  // Same upload into offline browser LocalApi
+  const env = browser('offline', makeSeedDb());
+  t.after(() => env.dom.window.close());
+  const locUp = await env.w.LocalApi.post('/api/calls/files', payload);
+  assert.equal(locUp.ok, true);
+  assert.equal(locUp.counts.total, 1016);
+  assert.equal(locUp.counts.situational, 65);
+  const [locDash, locRep, locAn] = await Promise.all([
+    env.w.LocalApi.get(`/api/dashboard?${rangeQ}`),
+    env.w.LocalApi.get(`/api/reports?type=call&level=team&${rangeQ}`),
+    env.w.LocalApi.get(`/api/calls/analysis?${rangeQ}`)
+  ]);
+
+  assert.equal(srvDash.callCount, locDash.callCount);
+  assert.equal(srvDash.situationalCount, locDash.situationalCount);
+  assert.equal(srvDash.situationalAvg, locDash.situationalAvg);
+  assert.equal(srvRep.situational.avgScore, locRep.situational.avgScore);
+  assert.equal(srvAn.kpis.situationalAvg, locAn.kpis.situationalAvg);
+  assert.equal(srvAn.kpis.avgScore, locAn.kpis.avgScore);
+});
+
+for (const build of ['public', 'offline']) {
+  test(`${build}: UI displays paired uploader, specialist situational card, reports situational table, and 0-chart situational heatmap`, async (t) => {
+    const db = makeSeedDb();
+    I.callFiles(db, [
+      { name: FILES.accFixed, rows: readSampleRows('accFixed') },
+      { name: FILES.accSit, rows: readSampleRows('accSit') },
+      { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+      { name: FILES.teleSit, rows: readSampleRows('teleSit') }
+    ]);
+    const env = browser(build, db);
+    const { w, dom, errors } = env;
+    t.after(() => dom.window.close());
+    await w.App.boot();
+    w.App.bindDateRangeUI();
+    await w.App.setDateRange({ from: '1405/07/25', to: '1405/08/21' });
+    const $ = (s) => w.document.querySelector(s);
+    const $$ = (s) => [...w.document.querySelectorAll(s)];
+
+    // 0. Dashboard shows situational KPI tile & weighted score
+    await go(w, 'dashboard');
+    assert.ok($('#dContent').textContent.includes('المان‌های موقعیتی'));
+    assert.ok($('#dContent').textContent.includes('نمره کل وزن‌دار'));
+
+    // 1. Data Center has paired upload UI, monthly templates card, and exact source filenames
+    await go(w, 'data');
+    assert.ok($('#pairBox'), 'Paired upload box exists');
+    assert.ok($('#pairFixedInp') && $('#pairSitInp') && $('#btnPairUpload'));
+    assert.ok($('#monthlyScoresCard') && $('#btnDlTicketSample') && $('#btnDlSocialSample'));
+    assert.ok($('#statusGrid').textContent.includes('موقعیتی'));
+    assert.equal($$('#statusTeams thead th').length, 5);
+    assert.ok($('#filesList').textContent.includes(FILES.accFixed), 'Exact Account fixed filename shown');
+    assert.ok($('#filesList').textContent.includes(FILES.teleSit), 'Exact Tele situational filename shown');
+
+    // 2. Portfolio master table shows situational column & specialist modal renders #pWeightedCard + #pSituationalCard
+    await go(w, 'portfolio');
+    assert.ok($$('#pAll thead th').some(th => th.textContent.includes('نمره موقعیتی')));
+    assert.ok($$('#pAll thead th').some(th => th.textContent.includes('نمره کل وزن‌دار')));
+    const firstAccName = readSampleRows('accSit')[0].account_expert_name;
+    const row = $$('#pAll tbody tr').find(tr => tr.dataset.name === firstAccName);
+    assert.ok(row, 'Account specialist present in portfolio table');
+    row.click();
+    await settle(); await settle();
+    assert.ok($('#pWeightedCard'), 'Weighted 4-pillar breakdown card rendered');
+    assert.ok($('#pWeightedCard').textContent.includes('۴۵٪'));
+    assert.ok($('#pWeightedCard').textContent.includes('۲۵٪'));
+    assert.ok($('#pSituationalCard'), 'Situational card rendered inside specialist report card');
+    assert.ok($('#pSituationalCard').textContent.includes('اعلام جشنواره'));
+    assert.equal($$('#pSituationalCard tbody tr').length, 4);
+    $('.profile-modal .x').click();
+
+    // 3. Reports (Call tab) keeps 7-col fixed #elemCardWrap AND renders separate #sitCardWrap
+    await go(w, 'reports');
+    $('#typeTabs button[data-t="call"]').click();
+    await settle(); await settle();
+    assert.equal($$('#elemCardWrap table thead th').length, 7);
+    assert.ok($('#sitCardWrap').textContent.includes('المان‌های موقعیتی'));
+    assert.equal($$('#sitCardWrap tbody tr').length, 11); // 4 account + 7 tele
+
+    // 4. Call Analysis renders situational heatmaps & keeps 0 charts
+    await go(w, 'call-analysis');
+    assert.equal(w.App.charts.length, 0);
+    assert.ok($('#anBody').textContent.includes('ماتریس خطای المان‌های موقعیتی'));
+    assert.ok($('#anBody').textContent.includes('میانگین نمره موقعیتی'));
+
+    // 5. Criteria page shows 11 fixed + 4 situational for Account, 10 fixed + 7 situational for Tele
+    await go(w, 'criteria');
+    assert.equal($$('#criteriaRows tr').length, 11);
+    assert.equal($$('#criteriaSituational tbody tr').length, 4);
+    $$('#criteriaTeams button').find(b => b.textContent.includes('تله')).click();
+    await settle();
+    assert.equal($$('#criteriaRows tr').length, 10);
+    assert.equal($$('#criteriaSituational tbody tr').length, 7);
+
+    assert.deepEqual(errors, []);
+  });
+}
+
+test('restructure: built standalone apps-script-full/Code.gs persists Call_Situational & Monthly_Scores cleanly', () => {
+  const code = fs.readFileSync(path.join(ROOT, 'apps-script-full/Code.gs'), 'utf8');
+  assert.ok(code.includes("callSituational: 'Call_Situational'"));
+  assert.ok(code.includes("monthlyScores: 'Monthly_Scores'"));
+  assert.ok(code.includes('calc_situational_score'));
+  assert.ok(code.includes('parseSituationalRows'));
+  assert.ok(code.includes('parseMonthlyScoreRows'));
+  assert.ok(code.includes('computeWeightedScore'));
+  assert.ok(code.includes('deleteSourceFile'));
+  assert.ok(code.includes('defaultTeamForForm'));
+
+  // Execute the built Apps Script Code.gs in a mock Google Sheets sandbox (including auto-creating missing tabs!)
+  function makeMockSheet(name) {
+    let grid = [];
+    return {
+      getName: () => name,
+      getLastRow: () => grid.length,
+      getLastColumn: () => grid.reduce((m, r) => Math.max(m, r.length), 0),
+      getDataRange: () => ({ getValues: () => grid.map(r => r.slice()) }),
+      clearContents: () => { grid = []; },
+      setFrozenRows: () => {},
+      deleteRows: (row, count) => { grid.splice(row - 1, count); },
+      getRange: (r, c, nr, nc) => ({
+        getValues: () => {
+          const out = [];
+          for (let i = 0; i < nr; i++) {
+            const row = grid[r - 1 + i] || [];
+            const slice = [];
+            for (let j = 0; j < nc; j++) slice.push(row[c - 1 + j] ?? '');
+            out.push(slice);
+          }
+          return out;
+        },
+        setValues: (vals) => {
+          for (let i = 0; i < vals.length; i++) {
+            if (!grid[r - 1 + i]) grid[r - 1 + i] = [];
+            for (let j = 0; j < vals[i].length; j++) grid[r - 1 + i][c - 1 + j] = vals[i][j];
+          }
+        },
+        setFontWeight: function () { return this; },
+        setBackground: function () { return this; },
+        setFontColor: function () { return this; },
+        setDataValidation: function () { return this; }
+      })
+    };
+  }
+  const sheetStore = new Map();
+  const ss = {
+    getId: () => 'mock-ss-1',
+    getSheets: () => Array.from(sheetStore.values()),
+    getSheetByName: (n) => sheetStore.get(n) || null,
+    insertSheet: (n) => { const s = makeMockSheet(n); sheetStore.set(n, s); return s; }
+  };
+  const propsMap = {};
+  const cacheMap = {};
+  const sandbox = {
+    console, Date, Math, JSON, Object, Array, String, Number, Boolean, RegExp, Error, TypeError, Set, Map,
+    encodeURIComponent, decodeURIComponent, isNaN, isFinite, parseInt, parseFloat,
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => propsMap[k] ?? null, setProperty: (k, v) => { propsMap[k] = String(v); } }) },
+    CacheService: { getScriptCache: () => ({ get: k => cacheMap[k] ?? null, put: (k, v) => { cacheMap[k] = String(v); }, getAll: ks => Object.fromEntries(ks.filter(k => k in cacheMap).map(k => [k, cacheMap[k]])), putAll: obj => Object.assign(cacheMap, obj), remove: k => { delete cacheMap[k]; } }) },
+    Utilities: { getUuid: () => 'uuid-test-1234', computeDigest: () => [1, 2, 3, 4], DigestAlgorithm: { SHA_256: 'SHA_256' }, Charset: { UTF_8: 'UTF_8' } },
+    SpreadsheetApp: { openById: () => ss, getActiveSpreadsheet: () => ss }
+  };
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(code, sandbox, { filename: 'Code.gs' });
+
+  // Pre-create only legacy tabs (intentionally omit Call_Situational & Monthly_Scores to test seamless existing-sheet upgrade!)
+  ['Agents', 'Tickets', 'Socials', 'Calls', 'QC_Agents', 'Actions', 'Reminders', 'Action_Types', 'Settings', 'Lists', 'Criteria', 'Meta', 'Call_Metadata', 'Fiscal_Months', 'QC_Users', 'Elements', 'Monthly_Summary']
+    .forEach(n => ss.insertSheet(n));
+
+  const db = sandbox.normalizeDatabase_(sandbox.makeSeedDatabase_());
+  sandbox.writeDatabaseDiff_(ss, {}, db, true);
+  // Remove new tabs to simulate a pre-restructure Google Sheet upgraded in-place!
+  sheetStore.delete('Call_Situational');
+  sheetStore.delete('Monthly_Scores');
+  assert.equal(sheetStore.has('Call_Situational'), false, 'Legacy sheet starts without Call_Situational');
+  assert.equal(sheetStore.has('Monthly_Scores'), false, 'Legacy sheet starts without Monthly_Scores');
+
+  // Upload Tele Fixed + Tele Situational + Ticket Monthly via LocalApi inside Code.gs
+  const beforeFp = sandbox.diffFingerprints_(db);
+  sandbox.window.LocalApi.adoptSnapshot(db);
+  sandbox.window.LocalApi.setSession({ name: 'admin', role: 'admin', active: true, unrestricted: true });
+  sandbox.window.LocalApi.run('POST', '/api/calls/files', {
+    mode: 'append',
+    files: [
+      { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+      { name: FILES.teleSit, rows: readSampleRows('teleSit') }
+    ]
+  });
+  sandbox.window.LocalApi.run('POST', '/api/monthly-scores/files', {
+    mode: 'append',
+    files: [{ name: 't.xlsx', rows: [{ 'نام کارشناس': 'هلیا هنرکار', 'نمره تیکت': 90, 'تعداد ارزیابی': 10, 'از تاریخ': '1405/07/25', 'تا تاریخ': '1405/08/21' }] }]
+  });
+  const written = sandbox.writeDatabaseDiffFp_(ss, beforeFp, sandbox.window.LocalApi.liveDb(), false, null);
+  assert.ok(written.includes('callFeedbacks') && written.includes('callSituational') && written.includes('monthlyScores'));
+  assert.equal(sheetStore.has('Call_Situational'), true, 'Call_Situational tab auto-created on legacy sheet');
+  assert.equal(sheetStore.has('Monthly_Scores'), true, 'Monthly_Scores tab auto-created on legacy sheet');
+
+  // Re-read fresh from mock Google Sheet and verify evalCount + Tele teams + per-file delete
+  sandbox.invalidateTabCache_();
+  const reloaded = sandbox.normalizeDatabase_(sandbox.readDatabase_(ss));
+  assert.equal(reloaded.callFeedbacks.length, 693);
+  assert.equal(reloaded.callSituational.length, 42);
+  assert.equal(reloaded.monthlyScores.length, 1);
+  assert.equal(reloaded.monthlyScores[0].evalCount, 10, 'evalCount decoded cleanly as number');
+  assert.equal(reloaded.callFeedbacks.every(r => sandbox.window.QCParse.teamForm(r.team) === 'tele'), true);
+
+  // Per-file deletion inside Code.gs removes ONLY situational file while keeping 693 fixed calls + monthly score intact
+  const delFp = sandbox.diffFingerprints_(reloaded);
+  sandbox.window.LocalApi.adoptSnapshot(reloaded);
+  const delRes = sandbox.window.LocalApi.run('DELETE', '/api/calls/files?name=' + encodeURIComponent(FILES.teleSit) + '&kind=situational', {});
+  assert.equal(delRes.ok, true);
+  assert.equal(delRes.removedSituational, 42);
+  assert.equal(delRes.removedCalls, 0);
+  sandbox.writeDatabaseDiffFp_(ss, delFp, sandbox.window.LocalApi.liveDb(), false, null);
+  sandbox.invalidateTabCache_();
+  const afterDel = sandbox.normalizeDatabase_(sandbox.readDatabase_(ss));
+  assert.equal(afterDel.callSituational.length, 0);
+  assert.equal(afterDel.callFeedbacks.length, 693, 'Fixed calls stay intact on sheet after deleting situational file');
+  assert.equal(afterDel.monthlyScores.length, 1, 'Monthly scores stay intact on sheet after deleting situational file');
+});
+
+test('restructure: 4-pillar weighted scoring (45/25/15/15), active normalization, and separate Ticket/Social monthly Excels', async (t) => {
+  const db = makeSeedDb();
+  I.callFiles(db, [
+    { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+    { name: FILES.teleSit, rows: readSampleRows('teleSit') }
+  ]);
+  const fullRange = { from: '1405/07/25', to: '1405/08/21' };
+
+  // 1) Before Ticket/Social upload: Helia Honarkar has 20/20 fixed calls (78.3) + situational (83.08 from calc_situational_score)
+  // Active weight = 45 + 25 = 70%; rawWeightedSum = 56.01; normalized = (45*78.3 + 25*83.08) / 70 = 80.01
+  const heliaBefore = R.agentProfile(db, 'هلیا هنرکار', fullRange);
+  assert.equal(heliaBefore.calls.count, 20);
+  assert.equal(heliaBefore.calls.avgScore, 78.3);
+  assert.equal(heliaBefore.situational.avgScore, 83.08);
+  assert.equal(heliaBefore.weighted.activeWeight, 70);
+  assert.equal(heliaBefore.weighted.rawWeightedSum, 56.01);
+  assert.equal(heliaBefore.weighted.score, 80.01);
+
+  // 2) Verify ready-to-use templates in نمونه اکسل ها/ parse cleanly & skip blank scores
+  const ticketTplName = 'نمونه_اکسل_نمرات_تیکت.xlsx';
+  const socialTplName = 'نمونه_اکسل_نمرات_پیامرسان.xlsx';
+  const ticketRaw = XLSX.utils.sheet_to_json(XLSX.readFile(path.join(SAMPLES_DIR, ticketTplName)).Sheets['نمرات_تیکت'], { defval: '' });
+  const socialRaw = XLSX.utils.sheet_to_json(XLSX.readFile(path.join(SAMPLES_DIR, socialTplName)).Sheets['نمرات_پیامرسان'], { defval: '' });
+  assert.equal(P.classifyMonthlyScoreFile(ticketTplName, ticketRaw), 'ticket');
+  assert.equal(P.classifyMonthlyScoreFile(socialTplName, socialRaw), 'social');
+  assert.equal(P.parseMonthlyScoreRows(ticketRaw, 'ticket', { agents: db.agents }).length, 0, 'Blank template rows skipped');
+
+  // Fill Helia's Ticket (90) and Social (80) scores
+  const hTicketRow = ticketRaw.find(r => P.normName(r['نام کارشناس']) === 'هلیا هنرکار');
+  const hSocialRow = socialRaw.find(r => P.normName(r['نام کارشناس']) === 'هلیا هنرکار');
+  assert.ok(hTicketRow && hSocialRow, 'Helia present in both ready-to-use templates');
+  hTicketRow['نمره تیکت'] = 90; hTicketRow['تعداد ارزیابی'] = 10;
+  hSocialRow['نمره پیام‌رسان'] = 80; hSocialRow['تعداد ارزیابی'] = 15;
+
+  const tImp = I.monthlyScoreFiles(db, [{ name: ticketTplName, rows: ticketRaw }]);
+  const sImp = I.monthlyScoreFiles(db, [{ name: socialTplName, rows: socialRaw }]);
+  assert.equal(tImp.results[0].ok, true); assert.equal(tImp.results[0].channel, 'ticket'); assert.equal(tImp.results[0].count, 1);
+  assert.equal(sImp.results[0].ok, true); assert.equal(sImp.results[0].channel, 'social'); assert.equal(sImp.results[0].count, 1);
+
+  // 3) Full 4/4 pillars active: 45%*78.3 + 25%*83.08 + 15%*80 + 15%*90 = 81.505 -> 81.51
+  const heliaAfter = R.agentProfile(db, 'هلیا هنرکار', fullRange);
+  assert.equal(heliaAfter.tickets.avgScore, 90);
+  assert.equal(heliaAfter.tickets.source, 'monthly_excel');
+  assert.equal(heliaAfter.socials.avgScore, 80);
+  assert.equal(heliaAfter.socials.source, 'monthly_excel');
+  assert.equal(heliaAfter.weighted.activeWeight, 100);
+  assert.equal(heliaAfter.weighted.rawWeightedSum, 81.51);
+  assert.equal(heliaAfter.weighted.score, 81.51);
+
+  // 4) Combined report & Fiscal monthlySummary stay in lockstep
+  const comb = R.combinedAgentReport(db, fullRange).find(r => r.name === 'هلیا هنرکار');
+  assert.equal(comb.avgScore, 81.51);
+  assert.equal(comb.ticketSource, 'monthly_excel');
+  assert.equal(comb.socialSource, 'monthly_excel');
+
+  // 5) Google Sheets Monthly_Scores round-trip
+  const exported = Sheets.dbToSheetRows(db);
+  assert.equal(exported.monthlyScores.length, 2);
+  const pulled = Sheets.sheetRowsToDb(exported);
+  assert.equal(pulled.monthlyScores.length, 2);
+  const fresh = makeSeedDb();
+  Sheets.mergePullIntoDb(fresh, pulled, 'merge');
+  assert.equal(fresh.monthlyScores.length, 2);
+
+  // 6) Server HTTP UTF-8 multi-chunk upload integrity & exact uploaded filenames in /api/calls/dirstatus
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-http-utf8-'));
+  fs.mkdirSync(path.join(dir, 'data/calls'), { recursive: true });
+  fs.cpSync(path.join(ROOT, 'shared'), path.join(dir, 'shared'), { recursive: true });
+  for (const file of ['server.js', 'callWatcher.js', 'googleSheets.js']) fs.copyFileSync(path.join(ROOT, file), path.join(dir, file));
+  fs.writeFileSync(path.join(dir, 'data/seed.json'), JSON.stringify(makeSeedDb()));
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'), 'dir');
+  fs.symlinkSync(path.join(ROOT, 'public'), path.join(dir, 'public'), 'dir');
+  const child = spawn(process.execPath, ['server.js'], {
+    cwd: dir, env: { ...process.env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  t.after(async () => {
+    await new Promise((resolve) => { child.once('exit', resolve); child.kill('SIGTERM'); });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  let log = '';
+  child.stderr.on('data', (d) => { log += d; });
+  const baseUrl = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Server timeout: ' + log)); }, 10000);
+    child.stdout.on('data', (chunk) => {
+      log += chunk;
+      const m = log.match(/http:\/\/0\.0\.0\.0:(\d+)/);
+      if (m) { clearTimeout(timer); resolve('http://127.0.0.1:' + m[1]); }
+    });
+    child.once('exit', (code) => { clearTimeout(timer); reject(new Error('Server exited ' + code + '\n' + log)); });
+  });
+
+  await fetch(baseUrl + '/api/calls/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      mode: 'append',
+      files: [
+        { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+        { name: FILES.teleSit, rows: readSampleRows('teleSit') },
+        { name: FILES.accFixed, rows: readSampleRows('accFixed') },
+        { name: FILES.accSit, rows: readSampleRows('accSit') }
+      ]
+    })
+  });
+  await fetch(baseUrl + '/api/monthly-scores/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'append', files: [{ name: ticketTplName, rows: ticketRaw }] })
+  });
+  await fetch(baseUrl + '/api/monthly-scores/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode: 'append', files: [{ name: socialTplName, rows: socialRaw }] })
+  });
+
+  // Verify zero UTF-8 replacement corruption on large Persian POST body & exact 20/20 Helia Honarkar rows!
+  const httpHelia = await fetch(`${baseUrl}/api/portfolio?ident=${encodeURIComponent('هلیا هنرکار')}&from=1405/07/25&to=1405/08/21`).then(r => r.json());
+  assert.equal(httpHelia.calls.count, 20, 'No UTF-8 chunk corruption dropping row 363!');
+  assert.equal(httpHelia.calls.avgScore, 78.3);
+  assert.equal(httpHelia.weighted.score, 81.51);
+
+  // Verify /api/calls/dirstatus lists ALL 6 exact uploaded filenames (not just disk files)
+  const ds = await fetch(`${baseUrl}/api/calls/dirstatus`).then(r => r.json());
+  const names = (ds.files || []).map(f => f.name);
+  for (const expectedName of [FILES.teleFixed, FILES.teleSit, FILES.accFixed, FILES.accSit, ticketTplName, socialTplName]) {
+    assert.ok(names.includes(expectedName), `dirstatus must include exact uploaded filename: ${expectedName}`);
+  }
+  assert.equal(ds.counts.monthlyTicket, 1);
+  assert.equal(ds.counts.monthlySocial, 1);
+
+  // 7) Per-file deletion on HTTP server removes ONLY the targeted source file (fixed, situational, monthly)
+  const delSit = await fetch(`${baseUrl}/api/calls/files?name=${encodeURIComponent(FILES.accSit)}&kind=situational`, { method: 'DELETE' }).then(r => r.json());
+  assert.equal(delSit.ok, true);
+  assert.equal(delSit.removedSituational, 23);
+  assert.equal(delSit.counts.situationalAccount, 0);
+  assert.equal(delSit.counts.situationalTele, 42);
+  assert.equal(delSit.counts.total, 1016); // Fixed calls untouched!
+  assert.equal(delSit.status.files.some(f => f.name === FILES.accSit), false);
+
+  const delTicket = await fetch(`${baseUrl}/api/calls/files?name=${encodeURIComponent(ticketTplName)}&kind=ticket_monthly`, { method: 'DELETE' }).then(r => r.json());
+  assert.equal(delTicket.ok, true);
+  assert.equal(delTicket.removedMonthly, 1);
+  assert.equal(delTicket.counts.monthlyTicket, 0);
+  assert.equal(delTicket.counts.monthlySocial, 1); // Social monthly untouched!
+
+  const delTeleFixed = await fetch(`${baseUrl}/api/calls/files?name=${encodeURIComponent(FILES.teleFixed)}&kind=form`, { method: 'DELETE' }).then(r => r.json());
+  assert.equal(delTeleFixed.ok, true);
+  assert.equal(delTeleFixed.removedCalls, 693);
+  assert.equal(delTeleFixed.counts.tele, 0);
+  assert.equal(delTeleFixed.counts.account, 323); // Account fixed untouched!
+});
+
+test('Target team categorization, unlinked situational backfill, and UI per-file deletion', async (t) => {
+  // 1) Unregistered Tele & Account experts auto-assign to Telesales / Account; MLM stays unset without importTeam
+  const db = makeSeedDb();
+  const teleRows = readSampleRows('teleFixed');
+  const teleSitRows = readSampleRows('teleSit');
+  const accRows = readSampleRows('accFixed');
+  const accSitRows = readSampleRows('accSit');
+
+  // Column sniffing overrides accidental wrong #importTeam on renamed file
+  const clsRenamed = P.classifyCallFile('گزارش_آبان.xlsx', teleRows, null, 'Account');
+  assert.equal(clsRenamed.kind, 'fixed');
+  assert.equal(clsRenamed.formType, 'tele', 'tele_expert_name column must win over accidental Account importTeam');
+
+  // Upload situational BEFORE fixed — verify period backfill when fixed arrives later!
+  const firstSit = I.callFiles(db, [{ name: FILES.teleSit, rows: teleSitRows }], { mode: 'append' });
+  assert.equal(firstSit.results[0].ok, true);
+  assert.equal(db.callSituational[0].periodFrom, '');
+  assert.equal(db.callSituational.every(r => P.teamForm(r.team) === 'tele'), true, 'All 42 Tele situational experts must have Tele team');
+
+  const thenFixed = I.callFiles(db, [
+    { name: FILES.teleFixed, rows: teleRows },
+    { name: FILES.accFixed, rows: accRows },
+    { name: FILES.accSit, rows: accSitRows }
+  ], { mode: 'append' });
+  assert.equal(thenFixed.ok, true);
+  assert.equal(db.callSituational.filter(r => r.formType === 'tele').every(r => r.periodFrom === '1405/07/25' && r.periodTo === '1405/08/21'), true,
+    'Previously unlinked Tele situational rows must auto-backfill period when Tele fixed file is uploaded');
+
+  // Zero Tele or Account rows should fall into «بدون تیم»!
+  const ds = R.dataStatus(db, {});
+  assert.equal(ds.byTeam.some(x => x.team === 'بدون تیم'), false, 'No Tele or Account rows should be dumped into بدون تیم');
+  assert.equal(ds.byTeam.find(x => x.team === 'Tele sales').callCount, 693);
+  assert.equal(ds.byTeam.find(x => x.team === 'Account').callCount, 323);
+
+  // Filtering callAnalysis by team Tele sales must include ALL 42 Tele specialists (not only the 26 in seed.json)
+  const anTele = R.callAnalysis(db, { form: 'tele', team: 'Tele sales' }, P.resolver(db.settings.callCriteria));
+  assert.equal(anTele.kpis.totalCalls, 693);
+  assert.equal(anTele.kpis.expertsWithData, 42);
+  assert.equal(anTele.kpis.situationalCount, 42);
+
+  // Filtering monthlyScores by "Telesales" matches agents whose team is "Tele sales"
+  db.monthlyScores = [{ channel: 'ticket', expertName: 'هلیا هنرکار', team: 'Tele sales', periodFrom: '1405/07/25', periodTo: '1405/08/21', score: 90, evalCount: 5, sourceFile: 't.xlsx' }];
+  assert.equal(R.filterMonthlyScores(db, { team: 'Telesales', from: '1405/07/25', to: '1405/08/21' }, 'ticket').length, 1);
+
+  // 2) Disk watcher respects dismissed files after per-file deletion and does not re-import on rescan
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'qc-dismiss-'));
+  t.after(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  const origCallsDir = process.env.CRM_QC_CALLS_DIR;
+  process.env.CRM_QC_CALLS_DIR = tmpDir;
+  t.after(() => {
+    if (origCallsDir === undefined) delete process.env.CRM_QC_CALLS_DIR;
+    else process.env.CRM_QC_CALLS_DIR = origCallsDir;
+  });
+  fs.copyFileSync(path.join(SAMPLES_DIR, FILES.accFixed), path.join(tmpDir, FILES.accFixed));
+  delete require.cache[require.resolve('../callWatcher')];
+  const CW = require('../callWatcher');
+  const wdb = makeSeedDb();
+  CW.scanOnce(wdb);
+  assert.equal(wdb.callFeedbacks.length, 323);
+  I.deleteSourceFile(wdb, FILES.accFixed, 'form');
+  CW.dismissFile(wdb, FILES.accFixed);
+  assert.equal(wdb.callFeedbacks.length, 0);
+  const rescan = CW.scanOnce(wdb);
+  assert.equal(rescan.changed, false);
+  assert.equal(wdb.callFeedbacks.length, 0, 'Dismissed disk file must NOT be silently re-imported');
+  assert.equal(CW.dirStatus(wdb).files.filter(f => !f.skipped && f.rows > 0).length, 0);
+
+  // 3) Browser UI: Data Center per-file delete button, range alert, and Reports default tab for call-only data
+  const env = browser('public', db);
+  t.after(() => env.dom.window.close());
+  const { w } = env;
+  await w.App.boot();
+  w.App.bindDateRangeUI();
+  await w.App.setDateRange({ preset: 'custom', from: '1405/06/01', to: '1405/06/31' });
+  await go(w, 'data');
+  await settle();
+
+  // Top statusRangeAlert warns that 0 calls are visible in 1405/06 while 1016 calls exist in 1405/07/25..1405/08/21
+  const topAlert = w.document.querySelector('#statusRangeAlert');
+  assert.ok(topAlert && topAlert.style.display !== 'none', 'Top statusRangeAlert must be visible when date range hides all uploaded calls');
+  assert.ok(topAlert.textContent.includes('۱۴۰۵/۰۷/۲۵'));
+
+  // Per-file delete buttons exist in #filesList for all loaded files
+  const delBtns = [...w.document.querySelectorAll('#filesList .btn-del-file')];
+  assert.ok(delBtns.length >= 4, 'Each source file row must have a per-file delete button');
+  const accSitBtn = delBtns.find(b => b.dataset.file === FILES.accSit);
+  assert.ok(accSitBtn, 'Delete button must exist for Account situational file');
+  accSitBtn.click();
+  await settle();
+  const cfYes = w.document.querySelector('#cfYes');
+  assert.ok(cfYes, 'Confirmation dialog must open before deleting a source file');
+  cfYes.click();
+  await settle();
+  const remainingBtns = [...w.document.querySelectorAll('#filesList .btn-del-file')];
+  assert.equal(remainingBtns.some(b => b.dataset.file === FILES.accSit), false, 'Deleted file must disappear from #filesList');
+  assert.equal(remainingBtns.some(b => b.dataset.file === FILES.teleFixed), true, 'Other source files must remain untouched');
+
+  // Clicking Reports with call-only data (0 tickets, 0 socials) auto-opens on Call tab instead of empty Social
+  await w.App.setDateRange({ preset: 'custom', from: '1405/07/25', to: '1405/08/21' });
+  await go(w, 'reports');
+  await settle();
+  assert.ok(w.document.querySelector('#typeTabs button[data-t="call"]').classList.contains('active'),
+    'Reports page must auto-open on Call tab when only call data exists');
+  assert.ok(w.document.querySelectorAll('#tblWrap tbody tr').length >= 42, 'Call report must immediately display all uploaded specialists');
+  assert.equal(env.errors.length, 0);
+});
+
+/* =========================================================================
+ * 10. 65-specialist full parity (42 Tele + 23 Account) & Specialist Profile
+ *     top 5 KPI strip order + date-coverage alert
+ * ========================================================================= */
+test('65-specialist Metabase parity (incl. سحر سامنی) and Specialist Profile top 5 KPI boxes order', async (t) => {
+  const db = makeSeedDb();
+  I.callFiles(db, [
+    { name: FILES.teleFixed, rows: readSampleRows('teleFixed') },
+    { name: FILES.teleSit, rows: readSampleRows('teleSit') },
+    { name: FILES.accFixed, rows: readSampleRows('accFixed') },
+    { name: FILES.accSit, rows: readSampleRows('accSit') }
+  ], { mode: 'replace' });
+
+  // Verify ALL 42 Tele + ALL 23 Account specialists match score_calc exactly
+  for (const [form, key] of [['tele', 'teleSit'], ['account', 'accSit']]) {
+    const rawSit = readSampleRows(key);
+    const parsedSit = P.parseSituationalRows(rawSit, form, { agents: db.agents });
+    for (let i = 0; i < rawSit.length; i++) {
+      const prof = R.agentProfile(db, parsedSit[i].expertName, {});
+      assert.ok(prof, `${form}: profile exists for ${parsedSit[i].expertName}`);
+      assert.equal(prof.calls.count, Number(rawSit[i].forms_count), `${form}: count for ${parsedSit[i].expertName}`);
+      assert.equal(prof.calls.avgScore, C.round2(Number(rawSit[i].avg_score)), `${form}: fixed avg for ${parsedSit[i].expertName}`);
+      assert.equal(prof.situational.avgScore, C.round2(Number(rawSit[i].calc_situational_score)), `${form}: situational for ${parsedSit[i].expertName}`);
+    }
+  }
+
+  // Exact check for سحر سامنی under both full range and 13 Mehr..13 Aban
+  const saharAll = R.agentProfile(db, 'سحر سامنی', {});
+  assert.equal(saharAll.calls.count, 20);
+  assert.equal(saharAll.calls.avgScore, 82.75);
+  assert.equal(saharAll.situational.avgScore, 72.43);
+  assert.deepEqual(saharAll.calls.allDateRange, { from: '1405/07/26', to: '1405/08/21' });
+
+  const saharPartial = R.agentProfile(db, 'سحر سامنی', { from: '1405/07/13', to: '1405/08/13' });
+  assert.equal(saharPartial.calls.count, 18);
+  assert.equal(saharPartial.calls.allCount, 20);
+  assert.deepEqual(saharPartial.calls.allDateRange, { from: '1405/07/26', to: '1405/08/21' });
+
+  // Specialist Profile UI: 5 KPI boxes side-by-side in exact order before all remaining sections
+  const env = browser('public', db);
+  t.after(() => env.dom.window.close());
+  const { w } = env;
+  await w.App.boot();
+  w.App.bindDateRangeUI();
+  await w.App.setDateRange({ preset: 'custom', from: '1405/07/13', to: '1405/08/13' });
+  await go(w, 'portfolio/' + encodeURIComponent('سحر سامنی'));
+  await settle(); await settle();
+
+  const kpiWrap = w.document.querySelector('#pTopKpis');
+  assert.ok(kpiWrap, '#pTopKpis must exist');
+  const boxes = [...kpiWrap.querySelectorAll('.summary-block')];
+  assert.equal(boxes.length, 5, 'Exactly 5 top KPI boxes must render side-by-side');
+  assert.deepEqual(boxes.map(b => b.dataset.kpi), ['overall', 'fixed', 'situational', 'ticket', 'social']);
+  assert.deepEqual(boxes.map(b => b.querySelector('.summary-head span').textContent.trim()), [
+    'نمره کل',
+    'نمره المان‌های ثابت',
+    'نمره المان‌های موقعیتی',
+    'نمره تیکت',
+    'نمره سوشال'
+  ]);
+  assert.ok(boxes[0].textContent.includes('مجموع ضریب تیکت، سوشال، تماس و المان‌های موقعیتی'));
+
+  // Verify #pTopKpis comes BEFORE #pWeightedCard, .scorecard, #pSituationalCard, and #pCallHistory
+  const DOC_POS_FOLLOWING = 4;
+  for (const sel of ['#pWeightedCard', '.scorecard', '#pSituationalCard', '#pCallHistory']) {
+    const target = w.document.querySelector(sel);
+    assert.ok(target, `${sel} must be rendered`);
+    assert.ok((kpiWrap.compareDocumentPosition(target) & DOC_POS_FOLLOWING) !== 0,
+      `#pTopKpis must appear before ${sel}`);
+  }
+
+  // Date coverage alert appears because 2 of Sahar's 20 calls lie after 1405/08/13, and 1-click fit button restores all 20
+  const alertEl = w.document.querySelector('#pDateCoverageAlert');
+  assert.ok(alertEl, '#pDateCoverageAlert must appear when calls exist outside the active date filter');
+  const fitBtn = w.document.querySelector('#pFitAgentRange');
+  assert.ok(fitBtn, '#pFitAgentRange button must exist');
+  fitBtn.click();
+  await settle(); await settle();
+  assert.equal(w.App.dateRange.from, '1405/07/26');
+  assert.equal(w.App.dateRange.to, '1405/08/21');
+  assert.equal(w.document.querySelector('#pDateCoverageAlert'), null, 'Alert must disappear once full specialist range is active');
+  assert.equal(w.document.querySelector('#pTopKpis [data-kpi="fixed"] strong').textContent.trim(), '۸۲.۷۵');
+  assert.equal(w.document.querySelector('#pTopKpis [data-kpi="situational"] strong').textContent.trim(), '۷۲.۴۳');
+  const callHistHeaders = [...w.document.querySelectorAll('#pCallHistory thead tr:last-child th')].map(th => th.textContent.trim());
+  assert.equal(callHistHeaders.includes('کارشناس QC'), false, 'کارشناس QC column must not appear in call history table');
+  assert.equal(env.errors.length, 0);
+});
+
+/* =========================================================================
+ * 11. Call Report: one-click import of registered system agents + Step 2
+ *     transition, and single-page continuous PDF verification with real jsPDF
+ * ========================================================================= */
+test('Call Report imports all registered system specialists on click and proceeds to Step 2', async (t) => {
+  const { JSDOM } = require('jsdom');
+  const html = fs.readFileSync(path.join(ROOT, 'public/call-admin-report.html'), 'utf8');
+  const calcJs = fs.readFileSync(path.join(ROOT, 'public/calc.js'), 'utf8');
+  const rangeJs = fs.readFileSync(path.join(ROOT, 'public/callReportRange.js'), 'utf8');
+  const seedAgents = JSON.parse(fs.readFileSync(path.join(ROOT, 'data/seed.json'), 'utf8')).agents;
+
+  // Verify the button UI exists in both Step 1 header box, table toolbar, and Excel upload tab
+  assert.ok(html.includes('id="btnUseSystemAgents"'));
+  assert.ok(html.includes('id="btnUseSystemAgentsExcel"'));
+  assert.ok(html.includes('id="btnImportSystemToTable"'));
+  assert.ok(html.includes('استفاده از کارشناسان ثبت‌شده روی سیستم'));
+
+  // Run callReportRange.js + useSystemRegisteredExperts inside a JSDOM sandbox connected to a mock parent
+  const dom = new JSDOM(`<!doctype html><html><body>
+    <div id="step1Panel">
+      <div id="tab-table" class="tab-content active">
+        <table><tbody id="expertEditTbody"></tbody></table>
+        <span id="expertCountStatus"></span>
+      </div>
+      <div id="step1Status"></div>
+    </div>
+    <div id="step2Panel" style="display:none"><div id="step2SystemBanner" style="display:none"></div></div>
+    <button id="btnUseSystemAgents"></button>
+  </body></html>`, { url: 'http://localhost:8000/call-admin-report.html', runScripts: 'outside-only' });
+  t.after(() => dom.window.close());
+  const win = dom.window;
+  win.allRawCallLogs = [];
+  win.allResults = [];
+  win.expertsList = [];
+  win.currentTeamAccessProfile = null;
+  win.normalizeStr = (s) => String(s || '').trim().toLowerCase();
+  win.switchTab = () => {};
+  win.renderExpertEditTable = () => {
+    win.document.getElementById('expertCountStatus').textContent = 'تعداد کارشناسان: ' + win.expertsList.length;
+  };
+  win.saveExpertsToStorage = () => {
+    win.localStorage.setItem('bimeh_bazar_experts_v2', JSON.stringify(win.expertsList));
+  };
+  win.showStep1Status = (msg) => { win.document.getElementById('step1Status').textContent = msg; };
+  win.saveExpertsAndProceed = () => {
+    win.document.getElementById('step1Panel').style.display = 'none';
+    win.document.getElementById('step2Panel').style.display = 'block';
+  };
+  win.fetch = async (url) => {
+    assert.equal(url, '/api/agents');
+    return { ok: true, json: async () => seedAgents };
+  };
+
+  win.eval(calcJs);
+  win.eval(rangeJs);
+
+  // Extract useSystemRegisteredExperts directly from call-admin-report.html and execute it in the sandbox
+  const fnMatch = html.match(/async function useSystemRegisteredExperts\(proceedToStep2\)[\s\S]*?^\s{8}\}/m);
+  assert.ok(fnMatch, 'useSystemRegisteredExperts must exist in call-admin-report.html');
+  win.eval(fnMatch[0]);
+
+  await win.useSystemRegisteredExperts(true);
+  assert.equal(win.expertsList.length, seedAgents.length, 'All 65 registered system specialists must be imported');
+  assert.equal(win.expertsList[0].id, String(seedAgents[0].ext));
+  assert.equal(win.expertsList[0].name, seedAgents[0].name);
+  assert.equal(win.expertsList[0].team, seedAgents[0].team);
+  assert.equal(win.document.getElementById('step1Panel').style.display, 'none', 'Step 1 hides after system import');
+  assert.equal(win.document.getElementById('step2Panel').style.display, 'block', 'Step 2 (call report upload) opens immediately');
+  assert.equal(win.document.getElementById('step2SystemBanner').style.display, 'block');
+  assert.ok(win.document.getElementById('step2SystemBanner').textContent.includes(String(seedAgents.length)));
+  const persisted = JSON.parse(win.localStorage.getItem('bimeh_bazar_experts_v2'));
+  assert.equal(persisted.length, seedAgents.length, 'Imported specialists are saved to storage');
+});
+
+/* =========================================================================
+ * 12. Full system backup v4, Apps Script favicon, Light Mode polish, and
+ *     clear missing-pillar weighted score (Social=100, Ticket=100 -> 100)
+ * ========================================================================= */
+test('Full backup v4 restores all datasets incl. fiscalMonths/lists/qcUsers/elements + Apps Script favicon + Light Mode + weighted score rule', async (t) => {
+  const vm = require('vm');
+  // (A) User's exact weighted score example: Social=100, Ticket=100, Call=missing, Situational=missing -> 100
+  const wOnlyTS = R.computeWeightedScore({ callAvg: '', situationalAvg: '', socialAvg: 100, ticketAvg: 100 });
+  assert.equal(wOnlyTS.score, 100);
+  assert.equal(wOnlyTS.activeWeight, 30);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'callFixed').active, false);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'situational').active, false);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'social').active, true);
+  assert.equal(wOnlyTS.pillars.find(p => p.key === 'ticket').active, true);
+
+  // (B) Full v4 backup restore preserves fiscalMonths, lists, elements, qcUsers, actions, reminders, situational & monthlyScores
+  const db = makeSeedDb();
+  const fullBackup = {
+    schema: 'crm-qc-backup', version: 4, datasetId: 'ds-v4-test', exportedAt: '2026-11-14T10:00:00Z',
+    range: { from: null, to: null },
+    settings: Object.assign({}, db.settings, { orgName: 'نسخه منتقل‌شده' }),
+    lists: { teams: ['Tele sales', 'Account', 'CustomTeam'], messengers: ['تلگرام', 'واتساپ'] },
+    agents: db.agents.slice(0, 5),
+    qcAgents: ['QC الف'],
+    qcUsers: [{ id: 1, name: 'مدیر اصلی', password: 'h:test', role: 'admin', active: true }],
+    fiscalMonths: [{ id: 'fm-1', name: 'آبان ۱۴۰۵', from: '1405/07/26', to: '1405/08/25', note: '' }],
+    elements: [{ scope: 'call', team: 'Tele sales', form: 'tele', key: 'k1', label: 'المان تست', excelKey: 'k1', active: true }],
+    agentActions: { [db.agents[0].name]: [{ id: 1, title: 'کال‌کوتچینگ', date: '1405/08/01', status: 'open', note: 'پیگیری' }] },
+    actionTypes: ['کال‌کوتچینگ'],
+    reminders: [{ id: 1, agent: db.agents[0].name, date: '1405/08/10', text: 'یادآور تست', done: false }],
+    tickets: [], socials: [], callFeedbacks: [],
+    callSituational: [{ syncId: 's1', expertName: db.agents[0].name, team: 'Tele sales', formType: 'tele', periodFrom: '1405/08/01', periodTo: '1405/08/20', formsCount: 5, situationalScore: 88, elements: {} }],
+    monthlyScores: [{ syncId: 'm1', channel: 'ticket', expertName: db.agents[0].name, team: 'Tele sales', periodFrom: '1405/08/01', periodTo: '1405/08/20', score: 95, evalCount: 10 }]
+  };
+  const restored = I.restore(db, fullBackup, 'replace');
+  assert.equal(restored.ok, true);
+  assert.equal(restored.restored.fiscalMonths, 1);
+  assert.equal(restored.restored.qcUsers, 1);
+  assert.equal(restored.restored.actions, 1);
+  assert.equal(restored.restored.reminders, 1);
+  assert.deepEqual(db.lists.teams, ['Tele sales', 'Account', 'CustomTeam']);
+  assert.equal(db.fiscalMonths[0].name, 'آبان ۱۴۰۵');
+  assert.equal(db.elements[0].label, 'المان تست');
+  assert.equal(db.qcUsers[0].name, 'مدیر اصلی');
+
+  // (C) Light Mode CSS checks (no dark table-row hover or black iframe background in light mode)
+  const stylesCss = fs.readFileSync(path.join(ROOT, 'public/styles.css'), 'utf8');
+  const enhCss = fs.readFileSync(path.join(ROOT, 'public/enhancements.css'), 'utf8');
+  const crThemeCss = fs.readFileSync(path.join(ROOT, 'public/callReportTheme.css'), 'utf8');
+  const callAnJs = fs.readFileSync(path.join(ROOT, 'public/pages/callAnalysis.js'), 'utf8');
+  const portJs = fs.readFileSync(path.join(ROOT, 'public/pages/portfolio.js'), 'utf8');
+  assert.ok(stylesCss.includes('.tbl tbody tr:hover { background: var(--row-hover); }'));
+  assert.equal(stylesCss.includes('background:#0b1220'), false);
+  assert.ok(enhCss.includes('--row-hover:rgba(2,116,179,.08)'));
+  assert.ok(crThemeCss.includes('html[data-theme="light"] tbody tr:hover td'));
+  assert.equal(callAnJs.includes('rgba(30,41,59'), false);
+  assert.ok(portJs.includes('دیتایی موجود نیست'));
+  assert.equal(portJs.includes('نرمال‌شده روی'), false);
+
+  // (D) Apps Script Server.gs sets repo logo favicon via setFaviconUrl by default
+  const codeGs = fs.readFileSync(path.join(ROOT, 'apps-script-full/Code.gs'), 'utf8');
+  const props = { QC_GAS_SPREADSHEET_ID: 'sheet-1' };
+  const ctx = {
+    console,
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null }) },
+    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/test/exec' }) },
+    HtmlService: {
+      createHtmlOutput: v => ({ content: v, setTitle() { return this; }, addMetaTag() { return this; }, setFaviconUrl(u) { this.favicon = u; return this; } }),
+      createHtmlOutputFromFile: n => ({ getContent: () => `<html>${n}</html>` })
+    }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(codeGs, ctx, { filename: 'Code.gs', timeout: 10000 });
+  const outDefault = ctx.doGet({});
+  assert.ok(outDefault.favicon && outDefault.favicon.includes('hagheofficial-cmyk/Qc-Restructure') && outDefault.favicon.endsWith('/favicon.png'));
+  props.QC_GAS_FAVICON_URL = 'https://example.com/custom-logo.png';
+  const outCustom = ctx.doGet({});
+  assert.equal(outCustom.favicon, 'https://example.com/custom-logo.png');
+
+  // (D2) CallReport.html built by build-apps-script embeds project favicon data URI
+  const callRepBuilt = fs.readFileSync(path.join(ROOT, 'apps-script-full/CallReport.html'), 'utf8');
+  assert.ok(callRepBuilt.includes('rel="icon" type="image/png" href="data:image/png;base64,'), 'CallReport.html embeds base64 favicon');
+
+  // (E) Global quick backup button renders, opens modal cleanly, and Light Mode toggle works
+  const env = browser('public', db);
+  const { w, dom, errors } = env;
+  t.after(() => dom.window.close());
+  await w.App.boot();
+  w.App.bindDateRangeUI();
+  w.App.bindChrome();
+  const qbBtn = w.document.getElementById('quickBackupBtn');
+  assert.ok(qbBtn, 'quickBackupBtn must exist in topbar');
+  qbBtn.click();
+  assert.ok(w.document.getElementById('qbDownloadBtn'), 'Quick backup download button opens inside modal');
+  assert.ok(w.document.getElementById('qbPickBtn'), 'Quick backup upload button opens inside modal');
+  // Toggle theme to Light Mode without JS errors
+  w.App.applyTheme('light');
+  assert.equal(w.document.documentElement.dataset.theme, 'light');
+  assert.equal(errors.length, 0);
+});
+
+test('Hamburger menu Call Report navigation works cleanly (incl. <base target="_top">, aliases, and GAS initial route)', async (t) => {
+  const data = fixture();
+  const env = browser('public', data);
+  const { w, dom, errors } = env;
+  t.after(() => dom.window.close());
+
+  // Simulate Google Apps Script HtmlService injecting <base target="_top">
+  const baseEl = w.document.createElement('base');
+  baseEl.setAttribute('target', '_top');
+  w.document.head.appendChild(baseEl);
+
+  await w.App.boot();
+  w.App.bindDateRangeUI();
+  w.App.bindChrome();
+  w.location.hash = '#/dashboard';
+  await w.App.route();
+  await settle();
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'داشبورد — نمای کلی');
+
+  // Open hamburger menu and click «گزارش تماس»
+  w.document.getElementById('hamburger').click();
+  assert.ok(w.document.getElementById('sidebar').classList.contains('open'));
+  const callLink = w.document.querySelector('#nav a[data-route="callreport"]');
+  assert.ok(callLink, 'Call Report nav item must exist in #nav');
+  const clickEv = new w.MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+  const notPrevented = callLink.dispatchEvent(clickEv);
+  await settle(); await settle();
+  assert.equal(notPrevented, false, 'Delegated click handler must cancel default browser navigation');
+  assert.equal(clickEv.defaultPrevented, true, 'Delegated click handler must preventDefault() so <base target="_top"> cannot reload into Dashboard');
+  assert.equal(w.location.hash, '#/callreport');
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'گزارش تماس');
+  assert.ok(w.document.getElementById('crFrame'), 'Call Report iframe must render');
+  assert.equal(w.document.getElementById('sidebar').classList.contains('open'), false, 'Sidebar closes after navigation');
+
+  // Route aliases (#/call-report and #/callreport?qcTheme=light) must also resolve to callreport, never Dashboard
+  w.location.hash = '#/call-report';
+  await w.App.route(); await settle();
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'گزارش تماس');
+  w.location.hash = '#/callreport?qcTheme=light';
+  await w.App.route(); await settle();
+  assert.equal(w.document.getElementById('pageTitle').textContent, 'گزارش تماس');
+
+  // Standalone GAS mode with empty APP_SCRIPT_URL still invokes renderStandalone (not broken call-admin-report.html)
+  w.APP_SCRIPT_MODE = true;
+  w.APP_SCRIPT_URL = '';
+  w.QCAuth = { required: true, token: 't1', user: { name: 'مدیر', role: 'admin' }, can: () => true };
+  let gasCalls = 0;
+  w.google = { script: { run: (() => {
+    const api = { _ok: null, _fail: null,
+      withSuccessHandler(fn) { api._ok = fn; return api; },
+      withFailureHandler(fn) { api._fail = fn; return api; },
+      getCallReportHtml() { gasCalls++; setTimeout(() => api._ok && api._ok('<html><head><title>CR</title></head><body>OK</body></html>'), 0); return api; }
+    };
+    return api;
+  })() } };
+  await w.App.route(); await settle(); await settle();
+  assert.equal(gasCalls, 1, 'Standalone GAS mode with empty APP_SCRIPT_URL still loads via getCallReportHtml');
+  assert.ok(w.document.querySelector('#content iframe[srcdoc]') || (w.document.querySelector('#content iframe') && w.document.querySelector('#content iframe').srcdoc.includes('OK')));
+  delete w.APP_SCRIPT_MODE; delete w.APP_SCRIPT_URL; delete w.google; delete w.QCAuth;
+
+  // GAS doGet passes ?route=callreport and ?page=call-report into __QC_INITIAL_ROUTE__ without exposing CallReport directly
+  const codeGs = fs.readFileSync(path.join(ROOT, 'apps-script-full/Code.gs'), 'utf8');
+  const ctx = {
+    console,
+    PropertiesService: { getScriptProperties: () => ({ getProperty: () => 'sheet-1' }) },
+    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/test/exec' }) },
+    HtmlService: {
+      createHtmlOutput: v => ({ content: v, setTitle() { return this; }, addMetaTag() { return this; }, setFaviconUrl() { return this; } }),
+      createHtmlOutputFromFile: n => ({ getContent: () => `<html><head><script>window.APP_SCRIPT_URL="__QC_APP_SCRIPT_URL__";window.APP_SCRIPT_INITIAL_ROUTE="__QC_INITIAL_ROUTE_VALUE__";</script></head><body>${n}</body></html>` })
+    }
+  };
+  vm.createContext(ctx);
+  vm.runInContext(codeGs, ctx, { filename: 'Code.gs', timeout: 10000 });
+  const r1 = ctx.doGet({ parameter: { route: 'callreport' } });
+  assert.ok(r1.content.includes('Index') && r1.content.includes('window.APP_SCRIPT_INITIAL_ROUTE="callreport"'));
+  const r2 = ctx.doGet({ parameter: { page: 'call-report' } });
+  assert.ok(r2.content.includes('Index') && r2.content.includes('window.APP_SCRIPT_INITIAL_ROUTE="callreport"'));
+  const rEmpty = ctx.doGet({ parameter: {} });
+  assert.ok(rEmpty.content.includes('window.APP_SCRIPT_INITIAL_ROUTE=""'));
+
+  // Built CallReport.html has a single favicon and guards .crmqc-back inside iframe
+  const crHtml = fs.readFileSync(path.join(ROOT, 'apps-script-full/CallReport.html'), 'utf8');
+  const iconMatches = crHtml.match(/<link rel="icon"/g) || [];
+  assert.equal(iconMatches.length, 1, 'CallReport.html must have exactly one favicon link');
+  assert.ok(crHtml.includes('if (window.parent && window.parent !== window) return;'), 'CallReport.html skips back bar when embedded in srcdoc iframe');
+
+  // Built Index.html's pages/callReport.js block must be 100% safe for Google Apps Script's
+  // HtmlService sanitizer (no raw <script>/<\/script> tags, no backticks, no /<\//g regex, no // comments)
+  const idxHtml = fs.readFileSync(path.join(ROOT, 'apps-script-full/Index.html'), 'utf8');
+  const crScriptMatch = idxHtml.match(/<script>\/\* pages\/callReport\.js \*\/([\s\S]*?)<\/script>/);
+  assert.ok(crScriptMatch, 'Index.html must contain the inlined pages/callReport.js script block');
+  const crScript = crScriptMatch[1];
+  assert.equal(/<script/i.test(crScript), false, 'pages/callReport.js must not contain raw <script tag (breaks GAS HtmlService)');
+  assert.equal(/<\/script|<\\\/script/i.test(crScript), false, 'pages/callReport.js must not contain raw </script> or <\\/script> (breaks GAS HtmlService)');
+  assert.equal(crScript.includes('`'), false, 'pages/callReport.js must not contain backtick template literals (breaks GAS HtmlService ES5 sanitizer)');
+  assert.equal(/\/[^/\n]*\\\/\//.test(crScript), false, 'pages/callReport.js must not contain regex with // (breaks GAS HtmlService sanitizer)');
+  assert.equal(crScript.includes('//'), false, 'pages/callReport.js must not contain // sequences (breaks GAS HtmlService sanitizer)');
+  assert.ok(crScript.includes("App.register('callreport'"), 'pages/callReport.js registers callreport route');
+  assert.equal(errors.length, 0);
+});
+
+test('Redline reasons (all redline reason column variants) and QC comments are parsed and rendered everywhere without false empty notices', async (t) => {
+  // (A) Parser detects all redline reason header variants + QC Comment and ignores null/- placeholders
+  const parsed = P.parseRows([
+    {
+      account_expert_name: 'کارشناس الف', score: 0, redline: 1,
+      'redline reason': 'ارائه اطلاعات اشتباه درباره کارمزد',
+      'QC Comment': 'کارشناس نرخ قدیمی اعلام کرده است',
+      form_created_date: '1405/06/20', lead_name: 'شریک اول'
+    },
+    {
+      account_expert_name: 'کارشناس ب', score: 0, RED_LINE: '"1"', redline: '"1"',
+      'Red_line_Reason': '"عدم رعایت احترام"',
+      'QC comment': '"لحن نامناسب در مکالمه"',
+      form_created_date: '1405/06/20', lead_name: 'شریک دوم'
+    },
+    {
+      tele_expert_name: 'کارشناس الف', score: 0, redline: '1',
+      'RED LINE REASON': 'null',
+      'QC Comment': 'پس از قطع تماس مجدد تماس گرفته نشد',
+      form_created_date: '1405/06/20', lead_name: 'شریک سوم'
+    },
+    {
+      tele_expert_name: 'کارشناس ب', score: 0, redline: '1',
+      'redline_reason_1': 'تخلف در اعلام جشنواره',
+      'QC Comment': '-',
+      form_created_date: '1405/06/20', lead_name: 'شریک چهارم'
+    }
+  ], 'account');
+  assert.equal(parsed[0].redlineReason, 'ارائه اطلاعات اشتباه درباره کارمزد');
+  assert.equal(parsed[0].qcComment, 'کارشناس نرخ قدیمی اعلام کرده است');
+  assert.equal(parsed[1].redlineReason, 'عدم رعایت احترام');
+  assert.equal(parsed[1].qcComment, 'لحن نامناسب در مکالمه');
+  assert.equal(parsed[2].redlineReason, '', 'Placeholder null must not be treated as a real reason');
+  assert.equal(parsed[2].qcComment, 'پس از قطع تماس مجدد تماس گرفته نشد');
+  assert.equal(parsed[3].redlineReason, 'تخلف در اعلام جشنواره');
+  assert.equal(parsed[3].qcComment, '', 'Placeholder - must not be treated as a real comment');
+
+  // (B) Real legacy Excel (qc_acc_form) with Red_line_Reason + QC comment AND new Metabase Excels with QC Comment
+  const repoRoot = path.resolve(ROOT, '..');
+  const legacyAcc = path.join(repoRoot, 'qc_acc_form_2026-10-14T19_30_41.611923442+03_30.xlsx');
+  if (fs.existsSync(legacyAcc)) {
+    const wb = XLSX.readFile(legacyAcc);
+    const rows = P.parseRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }), 'account');
+    const rls = rows.filter(r => R.hasRedline(r, 'call'));
+    assert.ok(rls.length >= 1);
+    assert.ok(rls[0].redlineReason.includes('ارائه اطلاعات اشتباه'), 'Legacy Red_line_Reason parsed');
+    assert.ok(rls[0].qcComment.includes('ردلاین'), 'Legacy QC comment parsed');
+  }
+  const newAcc = path.join(SAMPLES_DIR, findSample('qc_acc_new_form_'));
+  if (fs.existsSync(newAcc)) {
+    const wb = XLSX.readFile(newAcc);
+    const rows = P.parseRows(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' }), 'account');
+    const rls = rows.filter(r => R.hasRedline(r, 'call'));
+    assert.equal(rls.length, 3);
+    assert.ok(rls.every(r => R.redlineDetails(r).hasAny), 'All 3 new Account redlines have detail text via QC Comment');
+  }
+
+  // (C) UI rendering across Reports modal, Call detail modal, Portfolio, and Call Analysis
+  const data = fixture();
+  data.callFeedbacks = [
+    {
+      expertName: 'کارشناس الف', team: 'Tele Sales', formType: 'tele', reviewDate: '1405/06/20',
+      leadName: 'شریک با علت و کامنت', leadPhone: '09120001111', score: 0, redline: 1,
+      redlineReason: 'ارائه اطلاعات غلط <script>alert(1)</script>',
+      qcComment: 'جزئیات کامنت مدیر QC',
+      listeningTime: '60', elements: { Call_opening_quality: 0 }
+    },
+    {
+      expertName: 'کارشناس الف', team: 'Tele Sales', formType: 'tele', reviewDate: '1405/06/20',
+      leadName: 'شریک فقط با کامنت', leadPhone: '09120002222', score: 0, redline: 1,
+      redlineReason: '',
+      qcComment: 'پس از قطع تماس با شریک مجدد تماس گرفته نشد',
+      listeningTime: '45', elements: { Call_opening_quality: 1 }
+    }
+  ];
+  const { w, dom, errors } = browser('public', data);
+  t.after(() => dom.window.close());
+  await w.App.boot();
+  await w.App.setDateRange({ from: '1405/06/20', to: '1405/06/20' });
+
+  // 1) Reports -> Call tab -> Redlines group modal
+  await go(w, 'reports'); await settle();
+  w.document.querySelector('#typeTabs [data-t="call"]').click(); await settle(); await settle();
+  const groupBtn = w.document.querySelector('#tblWrap [data-call-group]');
+  assert.ok(groupBtn, 'Redlines count badge button must exist');
+  groupBtn.click();
+  const modalBody = w.document.querySelector('.modal-body');
+  assert.ok(modalBody.textContent.includes('ارائه اطلاعات غلط'), 'Modal shows redlineReason');
+  assert.ok(modalBody.textContent.includes('جزئیات کامنت مدیر QC'), 'Modal shows qcComment alongside reason');
+  assert.ok(modalBody.textContent.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'), 'Modal shows qcComment when reason column absent');
+  assert.equal(modalBody.textContent.includes('علت ردلاین در فرم ثبت نشده است'), false, 'Must NOT show false empty notice when comment exists');
+  assert.equal(modalBody.querySelector('script'), null, 'XSS escaped');
+  w.document.querySelector('.modal-back:last-child .modal-head .x').click();
+
+  // 2) Portfolio -> Redlines card + call history Redlines column
+  await go(w, 'portfolio/' + encodeURIComponent('کارشناس الف')); await settle(); await settle();
+  const pBody = w.document.querySelector('.profile-modal') || w.document.getElementById('content');
+  assert.ok(pBody.textContent.includes('ارائه اطلاعات غلط'));
+  assert.ok(pBody.textContent.includes('جزئیات کامنت مدیر QC'));
+  assert.ok(pBody.textContent.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'));
+  assert.equal(pBody.textContent.includes('(ثبت نشده)'), false, 'Portfolio must NOT show (ثبت نشده) when QC comment exists');
+  // Click single-call redline badge on the comment-only row
+  const badges = [...w.document.querySelectorAll('#pCallHistory [data-call-redline]')];
+  assert.equal(badges.length, 2);
+  badges[1].click();
+  const singleModal = w.document.querySelector('.modal-back:last-child .modal-body');
+  assert.ok(singleModal.textContent.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'));
+  assert.equal(singleModal.textContent.includes('علت ردلاین در فرم ثبت نشده است'), false);
+  w.document.querySelector('.modal-back:last-child .modal-head .x').click();
+  const closeProf = w.document.querySelector('.profile-modal .x');
+  if (closeProf) closeProf.click();
+
+  // 3) Call Analysis -> Redlines section
+  await go(w, 'call-analysis'); await settle(); await settle();
+  const caText = w.document.getElementById('content').textContent;
+  assert.ok(caText.includes('ارائه اطلاعات غلط'));
+  assert.ok(caText.includes('جزئیات کامنت مدیر QC'));
+  assert.ok(caText.includes('پس از قطع تماس با شریک مجدد تماس گرفته نشد'));
+  assert.equal(caText.includes('(علت ثبت نشده)'), false, 'Call Analysis must NOT show (علت ثبت نشده) when QC comment exists');
+  assert.equal(errors.length, 0);
+});
+
+test('Batch team PDF download builds a valid UTF-8 ZIP of per-specialist PDFs and supports merged team PDF', async (t) => {
+  const data = fixture();
+  data.agents = [
+    { id: 1, ext: 3001, name: 'الهه عسگری', team: 'MLM', active: true },
+    { id: 2, ext: 3002, name: 'سمیرا شکیب', team: 'MLM', active: true },
+    { id: 3, ext: 3003, name: 'کارشناس بایگانی', team: 'MLM', active: false },
+    { id: 4, ext: 3004, name: 'حامد میرزایی', team: 'Tele Sales', active: true }
+  ];
+  const { w, dom, errors } = browser('public', data);
+  t.after(() => dom.window.close());
+
+  // Mock layout geometry (JSDOM has no layout engine), html2canvas, jsPDF, and blob download
+  Object.defineProperty(w.HTMLElement.prototype, 'scrollWidth', { configurable: true, get() { return 1240; } });
+  Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 1240; } });
+  Object.defineProperty(w.HTMLElement.prototype, 'scrollHeight', { configurable: true, get() { return 1800; } });
+  const savedFiles = [];
+  const addedPages = [];
+  w.html2canvas = async () => ({
+    width: 1240,
+    height: 1800,
+    toDataURL: () => 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+  });
+  class FakeJsPdf {
+    constructor(opts) { this.opts = opts; this.pages = [opts]; this.images = []; }
+    setFillColor() {}
+    rect() {}
+    addPage(fmt, orient) { this.pages.push({ format: fmt, orientation: orient }); addedPages.push(fmt); }
+    addImage(img) { this.images.push(img); }
+    output(kind) {
+      assert.equal(kind, 'arraybuffer');
+      const txt = '%PDF-1.4\n%pages:' + this.pages.length + '\n%%EOF';
+      return Buffer.from(txt, 'utf8').buffer.slice(0);
+    }
+    save(name) { savedFiles.push({ kind: 'pdf', name, pages: this.pages.length }); }
+  }
+  w.jspdf = { jsPDF: FakeJsPdf };
+  const origDownloadBlob = w.QCCapture.downloadBlob;
+  w.QCCapture.downloadBlob = (blob, name) => { savedFiles.push({ kind: 'blob', name, blob }); };
+
+  await w.App.boot();
+  await go(w, 'portfolio'); await settle(); await settle();
+
+  // Open batch PDF modal
+  const batchBtn = w.document.getElementById('pBatchPdf');
+  assert.ok(batchBtn, 'Batch PDF button must render on Portfolio page');
+  batchBtn.click(); await settle();
+
+  const teamSel = w.document.getElementById('bpTeam');
+  assert.ok(teamSel, 'Team selector must exist in batch PDF modal');
+  // Select MLM team (2 active + 1 archived)
+  const mlmOpt = [...teamSel.options].find(o => o.value === 'MLM');
+  assert.ok(mlmOpt, 'MLM team option must exist');
+  teamSel.value = 'MLM';
+  teamSel.dispatchEvent(new w.Event('change'));
+  assert.ok(w.document.getElementById('bpSummary').textContent.includes('۲ کارشناس'), 'Only 2 active MLM specialists selected by default');
+  assert.ok(w.document.getElementById('bpSummary').textContent.includes('الهه عسگری'));
+  assert.ok(w.document.getElementById('bpSummary').textContent.includes('سمیرا شکیب'));
+
+  // 1) Run ZIP mode (default)
+  w.document.getElementById('bpStart').click();
+  for (let i = 0; i < 40 && !savedFiles.length; i++) await new Promise(r => setTimeout(r, 20));
+  assert.equal(savedFiles.length, 1, 'One ZIP download must be triggered');
+  assert.equal(savedFiles[0].kind, 'blob');
+  assert.ok(savedFiles[0].name.endsWith('.zip'), 'Download filename ends with .zip');
+  const zipBuf = await new Promise((resolve, reject) => {
+    const fr = new w.FileReader();
+    fr.onload = () => resolve(Buffer.from(fr.result));
+    fr.onerror = () => reject(fr.error);
+    fr.readAsArrayBuffer(savedFiles[0].blob);
+  });
+  // Verify PKZIP signatures and UTF-8 Persian PDF entries inside the archive
+  assert.equal(zipBuf.readUInt32LE(0), 0x04034b50, 'Valid ZIP local file header signature');
+  assert.equal(zipBuf.readUInt16LE(6), 0x0800, 'UTF-8 filename bit flag set');
+  const zipStr = zipBuf.toString('utf8');
+  assert.ok(zipStr.includes('الهه عسگری'), 'ZIP contains الهه عسگری PDF');
+  assert.ok(zipStr.includes('سمیرا شکیب'), 'ZIP contains سمیرا شکیب PDF');
+  assert.ok(zipStr.includes('%PDF-1.4'), 'ZIP entries contain real PDF payload');
+  assert.equal(zipStr.includes('حامد میرزایی'), false, 'Other teams must not be included');
+
+  // 2) Run Merged PDF mode
+  savedFiles.length = 0;
+  addedPages.length = 0;
+  batchBtn.click(); await settle();
+  const teamSel2 = w.document.getElementById('bpTeam');
+  teamSel2.value = 'MLM';
+  teamSel2.dispatchEvent(new w.Event('change'));
+  w.document.querySelector('input[name="bpMode"][value="merged"]').checked = true;
+  w.document.getElementById('bpStart').click();
+  for (let i = 0; i < 40 && !savedFiles.length; i++) await new Promise(r => setTimeout(r, 20));
+  assert.equal(savedFiles.length, 1, 'One merged PDF download must be triggered');
+  assert.equal(savedFiles[0].kind, 'pdf');
+  assert.ok(savedFiles[0].name.endsWith('.pdf'));
+  assert.equal(savedFiles[0].pages, 2, 'Merged PDF must contain 2 specialist pages for the 2 active MLM specialists');
+
+  // 3) Check GAS HtmlService sanitizer safety on rebuilt capture.js & pages/portfolio.js blocks
+  const idxHtml = fs.readFileSync(path.join(ROOT, 'apps-script-full/Index.html'), 'utf8');
+  for (const label of ['capture.js', 'pages/portfolio.js']) {
+    const m = idxHtml.match(new RegExp('<script>\\/\\* ' + label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\*\\/([\\s\\S]*?)<\\/script>'));
+    assert.ok(m, label + ' must be inlined in Index.html');
+    assert.equal(/<script|<\/script|<\\\/script/i.test(m[1]), false, label + ' must have zero raw script tags');
+    assert.equal(/\/[^/\n]*\\\/\//.test(m[1]), false, label + ' must have zero regex with //');
+  }
+  w.QCCapture.downloadBlob = origDownloadBlob;
+  assert.equal(errors.length, 0);
+});
+
+
+
+
