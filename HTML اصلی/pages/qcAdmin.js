@@ -605,7 +605,7 @@ function renderProtectionCardHtml() {
   const st = (window.QCProtect && window.QCProtect.getStatus) ? window.QCProtect.getStatus() : {};
   const cfg = (window.QCProtect && window.QCProtect.normalize)
     ? window.QCProtect.normalize(App.state && App.state.settings)
-    : { blockInspect: !!window.APP_SCRIPT_MODE, watermark: !!window.APP_SCRIPT_MODE, watermarkText: '' };
+    : { blockInspect: !!window.APP_SCRIPT_MODE };
   return `
     <div class="card" id="qcProtectionCard" style="margin-top:16px">
       <div class="card-head">
@@ -648,17 +648,6 @@ function renderProtectionCardHtml() {
               <div style="font-size:11.8px;color:var(--muted);margin-top:2px">کلیدهای <code>Ctrl+S</code>، <code>Ctrl+U</code>، <code>F12</code>، <code>Ctrl+Shift+I</code> و کلیک راست روی بخش‌های غیرمتنی مسدود می‌شوند (کپی/پیست داخل فیلدهای فرم‌ها کاملاً آزاد می‌ماند).</div>
             </div>
           </label>
-          <label class="qc-sec-toggle">
-            <input type="checkbox" id="protWatermark" ${cfg.watermark ? 'checked' : ''}>
-            <div>
-              <div style="font-weight:800;font-size:12.8px">واترمارک نام کاربر واردشده روی صفحه (ضدافشا و قابل ردیابی)</div>
-              <div style="font-size:11.8px;color:var(--muted);margin-top:2px">نام کاربر و تاریخ شمسی به‌صورت محو و غیرمزاحم در پس‌زمینه نمایش داده می‌شود (در PDFهای خروجی پرونده ظاهر نمی‌شود).</div>
-            </div>
-          </label>
-          <div class="field" style="max-width:420px;margin-top:4px">
-            <label for="protWatermarkText">متن اختصاصی واترمارک (اختیاری — پیش‌فرض نام سازمان)</label>
-            <input class="input" id="protWatermarkText" value="${esc(cfg.watermarkText || '')}" placeholder="مثلاً: سامانه اختصاصی کنترل کیفیت — محرمانه" maxlength="80">
-          </div>
           <div>
             <button type="button" class="btn primary" id="protSaveBtn"><i class="fa-solid fa-shield-check"></i> ذخیره تنظیمات حفاظت</button>
           </div>
@@ -683,9 +672,7 @@ function bindProtectionCard(root) {
   if (!btn) return;
   btn.addEventListener('click', async () => {
     const protection = {
-      blockInspect: !!($('#protBlockInspect', root) && $('#protBlockInspect', root).checked),
-      watermark: !!($('#protWatermark', root) && $('#protWatermark', root).checked),
-      watermarkText: ($('#protWatermarkText', root) && $('#protWatermarkText', root).value || '').trim().slice(0, 80)
+      blockInspect: !!($('#protBlockInspect', root) && $('#protBlockInspect', root).checked)
     };
     btn.disabled = true;
     try {

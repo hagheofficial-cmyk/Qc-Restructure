@@ -996,9 +996,7 @@ async function dispatchApi(req, res, pathname, query, body, session) {
       if (body.protection && typeof body.protection === 'object') {
         const prev = (s.protection && typeof s.protection === 'object') ? s.protection : {};
         s.protection = {
-          blockInspect: body.protection.blockInspect === undefined ? !!prev.blockInspect : !!body.protection.blockInspect,
-          watermark: body.protection.watermark === undefined ? !!prev.watermark : !!body.protection.watermark,
-          watermarkText: body.protection.watermarkText === undefined ? str(prev.watermarkText) : str(body.protection.watermarkText).slice(0, 80)
+          blockInspect: body.protection.blockInspect === undefined ? !!prev.blockInspect : !!body.protection.blockInspect
         };
       }
       saveStore();

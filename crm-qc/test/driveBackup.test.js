@@ -466,7 +466,7 @@ test('Drive OAuth diagnosis detects missing appsscript.json scope and exposes di
   } finally { dom.window.close(); }
 });
 
-test('Protected Apps Script Index.html locks stolen offline copies, strips seed/comments, blocks inspect shortcuts, and renders user watermark', async () => {
+test('Protected Apps Script Index.html locks stolen offline copies, strips seed/comments, blocks inspect shortcuts, and hardens LocalApi', async () => {
   const { JSDOM, VirtualConsole } = require('jsdom');
   const html = fs.readFileSync(path.join(__dirname, '..', 'apps-script-full', 'Index.html'), 'utf8')
     .split('__QC_APP_SCRIPT_URL__').join('https://script.google.com/macros/s/demo/exec')
@@ -486,17 +486,15 @@ test('Protected Apps Script Index.html locks stolen offline copies, strips seed/
     assert.match(stolenDom.window.document.body.textContent, /اجرای غیرمجاز/);
   } finally { stolenDom.window.close(); }
 
-  /* ۲) محافظت در زمان اجرا: مسدودسازی کلیدهای مشاهده سورس/ذخیره، کلیک راست غیرمتنی، واترمارک کاربر و قفل LocalApi.backup برای غیرادمین */
+  /* ۲) محافظت در زمان اجرا: مسدودسازی کلیدهای مشاهده سورس/ذخیره، کلیک راست غیرمتنی و قفل LocalApi.backup برای غیرادمین */
   const { dom, w } = browser('public');
   try {
     w.APP_SCRIPT_MODE = true;
     w.QCAuth.user = { name: 'سارا محمدی', role: 'qc' };
-    w.QCProtect.apply({ orgName: 'تیم کنترل کیفیت', protection: { blockInspect: true, watermark: true, watermarkText: 'محرمانه' } }, w.QCAuth.user);
+    w.QCProtect.apply({ orgName: 'تیم کنترل کیفیت', protection: { blockInspect: true } }, w.QCAuth.user);
 
-    const wm = w.document.querySelector('#qcWatermarkLayer');
-    assert.ok(wm, 'user watermark layer must be rendered');
-    assert.match(wm.textContent, /سارا محمدی/);
-    assert.match(wm.textContent, /محرمانه/);
+    /* واترمارك حذف شده — لایه‌ی آن هرگز ساخته نمی‌شود */
+    assert.equal(w.document.querySelector('#qcWatermarkLayer'), null, 'watermark layer must not exist');
 
     /* Ctrl+U و F12 باید preventDefault شوند */
     const evU = new w.KeyboardEvent('keydown', { key: 'u', ctrlKey: true, cancelable: true, bubbles: true });

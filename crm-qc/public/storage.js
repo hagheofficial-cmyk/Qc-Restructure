@@ -598,9 +598,7 @@ function dispatch(method, url, body) {
     if (b.protection && typeof b.protection === 'object') {
       const prev = (db.settings.protection && typeof db.settings.protection === 'object') ? db.settings.protection : {};
       db.settings.protection = {
-        blockInspect: b.protection.blockInspect === undefined ? prev.blockInspect !== false : !!b.protection.blockInspect,
-        watermark: b.protection.watermark === undefined ? prev.watermark !== false : !!b.protection.watermark,
-        watermarkText: b.protection.watermarkText === undefined ? str(prev.watermarkText) : str(b.protection.watermarkText).slice(0, 80)
+        blockInspect: b.protection.blockInspect === undefined ? prev.blockInspect !== false : !!b.protection.blockInspect
       };
     }
     saveDb(); return clone(db.settings);
