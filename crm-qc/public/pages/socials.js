@@ -10,6 +10,26 @@ const CRITERIA = [
   { key: 'qTone', icon: 'fa-feather-pointed', title: 'لحن و نگارش حرفه‌ای' }
 ];
 
+/* فیلد ساعت به‌صورت متن — تایپ مستقیم «۱۳:۲۶»/«13:26» خودکار به «HH:MM» 24 ساعته
+ * تبدیل می‌شود؛ از کنترل تایمر ساختاریافته‌ی مرورگر که در نسخه‌های ایرانی/RTL تایپ
+ * مستقیم را نمی‌پذیرد (و کاربر مجبور به انتخاب دستی از picker می‌شود) پرهیز می‌کنیم. */
+function normTime(raw) {
+  const s = C.faToEn(String(raw || '')).trim().replace(/[.:؛]/g, ':').replace(/\s+/g, ':');
+  const m = s.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
+  if (!m) return raw; // متن ناقص/نامعتبر دست‌نخورده می‌ماند
+  const h = +m[1], mi = +m[2];
+  if (h > 23 || mi > 59) return raw;
+  return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+}
+
+function timeField(label, value) {
+  const wrap = el(`<div class="field"><label>${label} <span class="req">*</span></label>` +
+    `<input type="text" class="input" inputmode="numeric" autocomplete="off" dir="ltr" placeholder="مثلاً 13:26" value="${esc(value || '')}"></div>`);
+  const input = $('input', wrap);
+  input.addEventListener('input', () => { input.value = normTime(input.value); });
+  return wrap;
+}
+
 /* ---------------------------------------------------------- فرم ثبت/ویرایش */
 async function formPage(root, editId) {
   const st = App.state;
@@ -73,8 +93,8 @@ async function formPage(root, editId) {
   const fTeam = el(`<div class="field"><label>تیم کارشناس <span class="hint">(خودکار)</span></label><input class="input" readonly tabindex="-1" style="opacity:.75;cursor:not-allowed" placeholder="—"></div>`);
   const fRecv = dateField({ label: 'تاریخ دریافت پیام', required: true, value: rec ? rec.receiveDate : '' });
   const fReply = dateField({ label: 'تاریخ پاسخدهی', required: true, value: rec ? rec.replyDate : '' });
-  const fTRecv = el(`<div class="field"><label>ساعت دریافت <span class="req">*</span></label><input type="time" class="input" value="${esc(rec ? rec.receiveTime : '')}"></div>`);
-  const fTReply = el(`<div class="field"><label>ساعت پاسخ <span class="req">*</span></label><input type="time" class="input" value="${esc(rec ? rec.replyTime : '')}"></div>`);
+  const fTRecv = timeField('ساعت دریافت', rec ? rec.receiveTime : '');
+  const fTReply = timeField('ساعت پاسخ', rec ? rec.replyTime : '');
   const fMsg = selectField({ label: 'پیامرسان', required: true, items: st.lists.messengers.map((m) => ({ value: m, label: m })) });
   const fStatus = selectField({ label: 'وضعیت پاسخ', required: true, items: st.lists.responseStatuses });
   const fReason = selectField({ label: 'دلیل تأخیر یا عدم پاسخ', items: st.lists.delayReasons });

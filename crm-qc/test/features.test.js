@@ -138,3 +138,30 @@ test('speed: saving a rating never triggers a full App.boot (round trips stay at
   assert.ok(app.includes('applyWrite(kind, delta)'), 'کمک‌تابع به‌روزرسانی شمارش هست');
   assert.ok(app.includes('noteRevision(rev)'), 'نسخه‌ی تازه از پاسخ نوشتن خوانده می‌شود');
 });
+
+test('socials form: فیلد ساعت متن است و تایپ مستقیم «13:26»/«۱۳:۲۶» خودکار به HH:MM تبدیل می‌شود', async () => {
+  const { w, dom } = browser('public');
+  const t = w.App; await t.boot();
+  await go(w, 'socials/new');
+  await settle(); await settle();
+  const fields = [...w.document.querySelectorAll('#baseGrid .field')];
+  const recvField = fields.find((f) => /ساعت دریافت/.test(f.textContent));
+  const replyField = fields.find((f) => /ساعت پاسخ/.test(f.textContent));
+  assert.ok(recvField && replyField, 'فیلدهای ساعت دریافت/پاسخ exist');
+  const recv = recvField.querySelector('input'), reply = replyField.querySelector('input');
+  assert.equal(recv.getAttribute('type'), 'text', 'فیلد ساعت نباید type=time باشد (تایپ مستقیم غیرممکن است)');
+  assert.equal(recv.getAttribute('inputmode'), 'numeric');
+
+  recv.value = '13:26'; recv.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(recv.value, '13:26', 'تایپ «13:26» خودکار خوانده می‌شود');
+  recv.value = '۱۳:۲۶'; recv.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(recv.value, '13:26', 'اعداد فارسی خودکار تبدیل می‌شوند');
+  recv.value = '9.5'; recv.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(recv.value, '09:05', 'نقطه‌نشین و صفر‌پudah براق می‌شود');
+  recv.value = 'abc'; recv.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(recv.value, 'abc', 'متن نامعتبر دست‌نخورده می‌ماند');
+
+  reply.value = '14:05'; reply.dispatchEvent(new w.Event('input', { bubbles: true }));
+  assert.equal(reply.value, '14:05', 'ساعت پاسخ هم خودکار خوانده می‌شود');
+  dom.window.close();
+});

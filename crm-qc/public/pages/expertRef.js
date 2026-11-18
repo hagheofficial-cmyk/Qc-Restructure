@@ -43,7 +43,17 @@ const selectHtml = (key, items, value, placeholder) => `<select class="input" da
 }).join('')}</select>`;
 const textHtml = (key, value, o) => `<input class="input" data-f="${key}" value="${esc(value || '')}" autocomplete="off"${o && o.ltr ? ' dir="ltr"' : ''}${o && o.ph ? ` placeholder="${esc(o.ph)}"` : ''}${o && o.readonly ? ' readonly' : ''}>`;
 const dateHtml = (key, value) => `<div class="date-f"><input class="input" data-f="${key}" dir="ltr" value="${esc(value || '')}" placeholder="۱۴۰۵/۰۷/۲۲" autocomplete="off"><button type="button" class="cal-btn" data-cal="${key}" aria-label="باز کردن تقویم"><i class="fa-regular fa-calendar"></i></button></div>`;
-const timeHtml = (key, value) => `<input class="input" type="time" dir="ltr" data-f="${key}" value="${esc(value || '')}">`;
+/* فیلد ساعت به‌صورت متن — تایپ مستقیم «۱۳:۲۶»/«13:26» خودکار به «HH:MM» 24 ساعته تبدیل می‌شود؛
+ * از کنترل تایمر ساختاریافته‌ی مرورگر که در نسخه‌های ایرانی/RTL تایپ مستقیم را نمی‌پذیرد پرهیز می‌کنیم. */
+const normTime = (raw) => {
+  const s = C.faToEn(String(raw || '')).trim().replace(/[.:؛]/g, ':').replace(/\s+/g, ':');
+  const m = s.match(/^(\d{1,2}):(\d{1,2})(?::\d{1,2})?$/);
+  if (!m) return raw;
+  const h = +m[1], mi = +m[2];
+  if (h > 23 || mi > 59) return raw;
+  return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+};
+const timeHtml = (key, value) => `<input class="input" type="text" inputmode="numeric" dir="ltr" autocomplete="off" data-f="${key}" placeholder="مثلاً 13:26" value="${esc(value || '')}">`;
 const readField = (scope, key) => { const n = scope.querySelector(`[data-f="${key}"]`); return n ? n.value.trim() : ''; };
 /** تاریخ جلالی معتبر یا '' (ارقام فارسی و تاریخ فشرده هم پذیرفته می‌شود). */
 function readDate(scope, key) { const j = C.parseJalali(readField(scope, key)); return j ? C.formatJalali(j) : ''; }
@@ -722,7 +732,13 @@ async function openForms(name, tab, root) {
       sp.querySelector(`[data-tri="${it.key}"]`).appendChild(t);
       tris[it.key] = t;
     });
-    sp.querySelectorAll('[data-f]').forEach((n) => n.addEventListener('change', live));
+    sp.querySelectorAll('[data-f]').forEach((n) => {
+      n.addEventListener('change', live);
+      /* فیلدهای ساعت: تایپ مستقیم خودکار نرمال و محاسبه زنده می‌شود */
+      if (n.dataset.f === 'receiveTime' || n.dataset.f === 'replyTime') {
+        n.addEventListener('input', () => { n.value = normTime(n.value); live(); });
+      }
+    });
     live();
     sp.querySelector('[data-submit="social"]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
