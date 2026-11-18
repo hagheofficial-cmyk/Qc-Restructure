@@ -1,4 +1,4 @@
-/* directory.js — مدیریت پایه: تنظیمات سامانه (نمایش، SLA، ساعت کاری، وزن‌های فرمول‌ها و دیتای نمونه)
+/* directory.js — مدیریت پایه: تنظیمات سامانه (نمایش، SLA، ساعت کاری، وزن‌های فرمول‌ها و ماه‌های مالی)
  * مدیریت کارشناسان و QC به‌صورت کامل در صفحه‌ی «مدیریت کارشناسان» (آدرس agents#) انجام می‌شود.
  */
 (function () {
@@ -13,7 +13,7 @@ async function render(root) {
   root.innerHTML = `
     <div class="page-head">
       <div class="ph-ic"><i class="fa-solid fa-users-gear"></i></div>
-      <div><h2>مدیریت پایه</h2><p>تنظیمات کامل سامانه — نمایش و نمره‌بندی، SLA و ساعت کاری، وزن‌های فرمول و دیتای نمونه</p></div>
+      <div><h2>مدیریت پایه</h2><p>تنظیمات کامل سامانه — نمایش و نمره‌بندی، SLA و ساعت کاری، وزن‌های فرمول</p></div>
     </div>
 
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(430px,1fr))">
@@ -105,19 +105,6 @@ async function render(root) {
         </div>
       </div>
 
-      <!-- دیتای نمونه -->
-      <div class="card">
-        <div class="card-head amber"><div class="head-icon"><i class="fa-solid fa-flask-vial"></i></div>
-          <div><h3>دیتای نمونه (برای تست سریع)</h3><div class="sub">با یک کلیک چند رکورد فیک در ۳ ماه اخیر اضافه کن تا گزارش‌ها و داشبورد پر بشن؛ با یک کلیک هم همه پاک می‌شن</div></div></div>
-        <div class="card-pad" style="display:flex;flex-direction:column;gap:11px">
-          <div id="demoState" class="stat-strip"><span class="ss"><i class="fa-solid fa-circle-check" style="color:var(--good)"></i> الان دیتای نمونه روی سیستم نیست</span></div>
-          <div style="display:flex;gap:9px;flex-wrap:wrap">
-            <button class="btn brand" id="demoAdd"><i class="fa-solid fa-wand-magic-sparkles"></i> بارگذاری دیتای نمونه (تیکت + سوشال + تماس)</button>
-            <button class="btn danger-soft" id="demoDel" style="display:none"><i class="fa-solid fa-trash-can"></i> حذف کامل دیتای نمونه</button>
-          </div>
-          <div class="note" style="margin:0"><i class="fa-solid fa-circle-info"></i> رکوردهای نمونه با تگ <code>demo</code> ذخیره می‌شن و با دیتای واقعی خلط نمی‌شن — حذفشون همه رو یک‌جا پاک می‌کنه.</div>
-        </div>
-      </div>
     </div>
 
     <div class="card" style="margin-top:16px">
@@ -165,44 +152,6 @@ async function render(root) {
       render(root); /* رفرش همان صفحه با مقادیر نهایی */
     } catch (e) { toast(e.message, 'error'); }
     btn.disabled = false;
-  });
-
-  /* ---------- دیتای نمونه ---------- */
-  async function demoState() {
-    try {
-      const b = await api.get('/api/bootstrap');
-      let hasDemo = false;
-      try {
-        const all = await api.get('/api/tickets?per=200');
-        hasDemo = (all.rows || []).some((r) => r.demo);
-        if (!hasDemo) {
-          const allS = await api.get('/api/socials?per=200');
-          hasDemo = (allS.rows || []).some((r) => r.demo);
-        }
-      } catch (_) {}
-      const cm = b.counts && b.counts.callMeta;
-      if (!hasDemo && cm && cm.demo) hasDemo = true;
-      $('#demoState').innerHTML = hasDemo
-        ? `<span class="ss" style="color:var(--warn)"><i class="fa-solid fa-flask-vial" style="color:var(--warn)"></i> دیتای نمونه روی سیستم فعال است — با «حذف کامل» پاکش کن</span>`
-        : `<span class="ss"><i class="fa-solid fa-circle-check" style="color:var(--good)"></i> الان دیتای نمونه روی سیستم نیست</span>`;
-      $('#demoDel').style.display = hasDemo ? '' : 'none';
-    } catch (e) { /* silent */ }
-  }
-  $('#demoAdd').addEventListener('click', async () => {
-    try {
-      const r = await api.post('/api/demo', {});
-      toast(`دیتای نمونه بازه تیر تا شهریور لود شد — تیکت ${fa(r.added.tickets)} / سوشال ${fa(r.added.socials)} / تماس ${fa(r.added.calls)}. برید داشبورد!`, 'success', 5200);
-      demoState();
-    } catch (e) { toast(e.message, 'error'); }
-  });
-  $('#demoDel').addEventListener('click', () => {
-    confirmDlg('حذف دیتای نمونه', 'همه رکوردهای تگ‌دار demo (تیکت، سوشال، تماس) پاک می‌شوند. دیتای واقعی دست‌نخورده می‌ماند.', async () => {
-      try {
-        const r = await api.del('/api/demo');
-        toast(`پاک شد — تیکت ${fa(r.removed.tickets)} / سوشال ${fa(r.removed.socials)} / تماس ${fa(r.removed.calls)}`, 'success', 4000);
-        demoState();
-      } catch (e) { toast(e.message, 'error'); }
-    });
   });
 
   /* ------------------------------------------------------ ماه‌های مالی */
@@ -378,7 +327,7 @@ async function render(root) {
   });
   renderFiscal();
 
-  weekendChips(); demoState();
+  weekendChips();
 }
 
 App.register('directory', { title: 'مدیریت پایه', render });

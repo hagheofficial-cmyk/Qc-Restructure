@@ -36,6 +36,9 @@ for (const build of ['public', 'offline']) {
     await t.test('ماه مالی: ساخت خودکار ۱۲ ماه، اعتبارسنجی تکراری و ذخیره', async () => {
       await go(w, 'directory');
       await settle();
+      assert.equal($('#demoAdd'), null, 'گزینه‌ی «دیتای نمونه» از صفحه حذف شده');
+      assert.equal($('#demoDel'), null, 'دکمه‌ی «حذف کامل دیتای نمونه» از صفحه حذف شده');
+      assert.equal(text('.card h3').includes('دیتای نمونه'), false, 'کارت دیتای نمونه نمایش داده نمی‌شود');
       $('#fmYear').value = '1405';
       $('#fmAuto').click();
       await settle();

@@ -76,14 +76,14 @@ function monthOfDate(months, date) {
   return (months || []).find((m) => C.jalaliInRange(j, C.parseDate(m.from), C.parseDate(m.to))) || null;
 }
 
+/* فقط ماهی که امروز واقعاً در بازه‌ی آن قرار دارد «جاری» محسوب می‌شود.
+ * در هنگامه‌های حاشیه‌ای (امروز قبل از همه دوره‌ها یا بعد از همه آن‌ها) هیچ ماه
+ * «جاری» وجود ندارد؛ برگرداندن اولین/آخرین ماه به‌اشتباه نمایش «ماه مالی جاری»
+ * برای ماه آینده یا گذشته می‌انجامد (باگ نمایش بازه‌های آماده). */
 function currentIndex(months, today) {
   const list = months || [];
   const hit = monthOfDate(list, today);
-  if (hit) return list.indexOf(hit);
-  const t = C.parseDate(today || C.todayJalali());
-  let idx = -1;
-  list.forEach((m, i) => { if (t && C.jalaliCmp(C.parseDate(m.from), t) <= 0) idx = i; });
-  return idx >= 0 ? idx : (list.length ? 0 : -1);
+  return hit ? list.indexOf(hit) : -1;
 }
 
 function currentMonth(months, today) {

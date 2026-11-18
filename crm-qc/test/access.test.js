@@ -246,6 +246,36 @@ test('shared/fiscal: بازه‌ی آماده‌ی ماه مالی از ردیف
   assert.deepEqual(Fiscal.presetOptions([], today), []);
 });
 
+test('shared/fiscal: «ماه مالی جاری/قبل» فقط وقتی نمایش می‌دهد که امروز در بازه باشد (باگ نمایش)', () => {
+  const today = C.formatJalali(C.todayJalali());
+
+  /* ماه‌های آینده: امروز قبل از همه دوره‌ها — نباید هیچ «جاری» نمایش داده شود */
+  const future = Fiscal.normalizeMonths([
+    { name: 'فروردین ۱۴۰۶', from: '1406/01/01', to: '1406/01/31' },
+    { name: 'اردیبهشت ۱۴۰۶', from: '1406/02/01', to: '1406/02/31' }
+  ]);
+  assert.equal(Fiscal.currentMonth(future, today), null, 'ماه آینده «جاری» محسوب نمی‌شود');
+  assert.equal(Fiscal.previousMonth(future, today), null, 'ماه آینده «قبل» محسوب نمی‌شود');
+  assert.deepEqual(Fiscal.presetOptions(future, today).map((o) => o.value), ['fm:fm2', 'fm:fm1'],
+    'فقط گزینه‌های «همه ماه‌های مالی» نمایش داده می‌شوند');
+  assert.equal(Fiscal.presetOptions(future, today).every((o) => o.group === 'همه ماه‌های مالی'), true);
+
+  /* ماه‌های گذشته: امروز بعد از همه دوره‌ها — نباید ماه گذشته «جاری» نمایش داده شود */
+  const past = Fiscal.normalizeMonths([
+    { name: 'فروردین ۱۴۰۴', from: '1404/01/01', to: '1404/01/31' },
+    { name: 'اردیبهشت ۱۴۰۴', from: '1404/02/01', to: '1404/02/31' }
+  ]);
+  assert.equal(Fiscal.currentMonth(past, today), null, 'ماه گذشته «جاری» محسوب نمی‌شود');
+  assert.equal(Fiscal.previousMonth(past, today), null);
+  assert.equal(Fiscal.presetRange(past, 'fm:cur', today), null, 'fm:cur بازه‌ی معتبر نمی‌سازد');
+
+  /* حالت عادی: ماه شامل امروز «جاری» و ماه قبل از آن «قبل» است */
+  const fx = fiscalFixture();
+  const months = Fiscal.normalizeMonths([fx.previous, fx.current]);
+  assert.equal(Fiscal.currentMonth(months, today).name, 'دوره جاری');
+  assert.equal(Fiscal.previousMonth(months, today).name, 'دوره قبل');
+});
+
 test('shared/fiscal: خلاصه‌ی ماهانه‌ی آماده برای تب Monthly_Summary (بند ۸)', () => {
   const db = fixture();
   const out = Fiscal.monthlySummary(db, {});
