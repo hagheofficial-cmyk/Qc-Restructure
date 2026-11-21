@@ -165,7 +165,7 @@ URLSearchParams.prototype.forEach = function (callback, context) {
 };
 
 `;
-  const sharedOrder = ['calc.js', 'parseQc.js', 'reports.js', 'registry.js', 'importData.js', 'expertRef.js', 'access.js', 'fiscal.js', 'elements.js'];
+  const sharedOrder = ['calc.js', 'parseQc.js', 'reports.js', 'registry.js', 'importData.js', 'expertRef.js', 'access.js', 'fiscal.js', 'elements.js', 'ritStats.js'];
   const shared = sharedOrder.map((name) => {
     const src = read(path.join(SHARED, name)).replace(/typeof self !== 'undefined' \? self : this/g, 'globalThis');
     return `\n/* ---- shared/${name} ---- */\n${src}\n`;

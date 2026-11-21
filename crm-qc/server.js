@@ -20,6 +20,7 @@ const Sheets = require('./googleSheets.js');
 const Access = require('./shared/access.js');
 const Fiscal = require('./shared/fiscal.js');
 const Elements = require('./shared/elements.js');
+const RitStats = require('./shared/ritStats.js');
 const crypto = require('crypto');
 
 const ROOT = __dirname;
@@ -606,6 +607,67 @@ async function dispatchApi(req, res, pathname, query, body, session) {
   if (pathname === '/api/dashboard' && method === 'GET') {
     return ok(res, memoized(dataEpoch + '|' + scopeKeyOf(session) + '|dashboard|' + qkey(query),
       () => QCReports.dashboard(db, { from: query.from, to: query.to, team: query.team })));
+  }
+
+  /* ---- داشبورد آمار ریت (کارشناسان کیوسی) ---- */
+  if (pathname.startsWith('/api/rit/')) {
+    const ritParts = pathname.split('/').filter(Boolean); // ['api','rit', ...]
+    const ritSub = ritParts[2];
+    /* فهرست ماه‌های مالی (۲۰ → ۱۹) — در صورت خالی، ساخته و ذخیره می‌شود */
+    if (ritSub === 'fiscal' && method === 'GET') {
+      const seeded = RitStats.ensureFiscalMonths(db, C.formatJalali(C.todayJalali()));
+      if (seeded.changed) saveStore();
+      return ok(res, { months: Fiscal.normalizeMonths(db.fiscalMonths), seeded: seeded.changed });
+    }
+    /* آمار ریت بر اساس کارشناس کیوسی و کارشناس فروش در بازه‌ی انتخابی */
+    if (ritSub === 'stats' && method === 'GET') {
+      const view = Access.isAdmin(session) ? db : Access.scopeDb(db, session);
+      return ok(res, RitStats.stats(view, {
+        from: str(query.from), to: str(query.to),
+        team: query.team, qcAgent: query.qc
+      }));
+    }
+    /* ردیف‌های خام اکسل (همان‌طور که آپلود شده‌اند) برای بازکردن دقیق */
+    if (ritSub === 'rows' && method === 'GET') {
+      const view = Access.isAdmin(session) ? db : Access.scopeDb(db, session);
+      const allowed = view.__scope ? (view.agents || []).map((a) => a.name) : null;
+      return ok(res, RitStats.rawRows(view, {
+        file: str(query.file), qc: str(query.qc), agent: str(query.agent),
+        from: str(query.from), to: str(query.to), team: str(query.team),
+        limit: str(query.limit), allowedAgents: allowed
+      }));
+    }
+    /* مرکز دیتا: فایل‌های آپلودشده — فیلتر و مرتب‌سازی بر اساس تاریخ/تیم */
+    if (ritSub === 'files' && method === 'GET') {
+      const view = Access.isAdmin(session) ? db : Access.scopeDb(db, session);
+      return ok(res, RitStats.files(view, {
+        from: str(query.from), to: str(query.to),
+        team: query.team, q: str(query.q), sort: str(query.sort), dir: str(query.dir)
+      }));
+    }
+    /* معیار تارگت ماهانه تیم‌ها */
+    if (ritSub === 'targets') {
+      if (method === 'GET') {
+        return ok(res, { targets: RitStats.targetsWithProgress(db), canEdit: Access.isAdmin(session) });
+      }
+      if (method === 'PUT') {
+        const out = RitStats.saveTarget(db, {
+          team: str((body && body.team) || ''),
+          month: str((body && body.month) || ''),
+          target: Number((body && body.target) || 0),
+          note: str((body && body.note) || '')
+        });
+        if (out.error) return bad(res, out.error);
+        saveStore();
+        return ok(res, { ok: true, targets: RitStats.targetsWithProgress(db) });
+      }
+      if (method === 'DELETE' && ritParts[3]) {
+        const out = RitStats.removeTarget(db, str(ritParts[3]));
+        saveStore();
+        return ok(res, out);
+      }
+    }
+    return notFound(res);
   }
 
   /* ارزیابی تیکت */

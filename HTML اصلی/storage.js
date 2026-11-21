@@ -556,6 +556,41 @@ function dispatch(method, url, body) {
   }
   if (name === 'dashboard' && method === 'GET') return R.dashboard(db, q);
 
+  /* ---- داشبورد آمار ریت (کارشناسان کیوسی) ---- */
+  if (name === 'rit') {
+    if (id === 'fiscal' && method === 'GET') {
+      const seeded = QCRitStats.ensureFiscalMonths(db);
+      if (seeded.changed) saveDb();
+      return clone({ months: db.fiscalMonths, seeded: seeded.changed });
+    }
+    if (id === 'stats' && method === 'GET') return clone(QCRitStats.stats(db, q));
+    if (id === 'rows' && method === 'GET') return clone(QCRitStats.rawRows(db, q));
+    if (id === 'files' && method === 'GET') return clone(QCRitStats.files(db, q));
+    if (id === 'targets') {
+      if (method === 'GET') {
+        return clone({ targets: QCRitStats.targetsWithProgress(db), canEdit: A.isAdmin(session) });
+      }
+      if (method === 'PUT') {
+        const out = QCRitStats.saveTarget(db, {
+          team: str(body.team), month: str(body.month),
+          target: Number(body.target) || 0, note: str(body.note)
+        });
+        if (out.error) bad(out.error);
+        saveDb();
+        return clone({ ok: true, targets: QCRitStats.targetsWithProgress(db) });
+      }
+      if (method === 'DELETE') {
+        const rest = url.slice(1).split('?')[0].split('/');
+        const targetId = rest[3] ? decodeURIComponent(rest[3]) : null;
+        if (!targetId) bad('شناسه‌ی تارگت الزامی است');
+        const out = QCRitStats.removeTarget(db, targetId);
+        saveDb();
+        return clone(out);
+      }
+    }
+    return bad('not found', 404);
+  }
+
   if (name === 'agents') {
     if (method === 'GET' && id == null) return clone(db.agents);
     if (method === 'DELETE' && id == null) { const result = Registry.removeAll(db, body); saveDb(); return result; }

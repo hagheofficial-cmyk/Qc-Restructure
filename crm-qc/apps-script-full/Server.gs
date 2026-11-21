@@ -35,6 +35,7 @@ var QC_GAS_SHEETS = {
   callReportExperts: 'Call_Report_Experts',
   callReportAccess: 'Call_Report_Access',
   fiscalMonths: 'Fiscal_Months',
+  ritTargets: 'Rit_Targets',
   qcUsers: 'QC_Users',
   elements: 'Elements',
   monthlySummary: 'Monthly_Summary'
@@ -61,6 +62,8 @@ var QC_GAS_SCHEMAS = {
   Call_Report_Access: ['json'],
   /* بازه‌های ماه مالی؛ مستقیم روی شیت قابل نوشتن‌اند (بند ۲) */
   Fiscal_Months: ['id', 'name', 'from', 'to', 'note'],
+  /* معیار تارگت ریت ماهانه‌ی تیم‌ها (آمار ریت) */
+  Rit_Targets: ['id', 'team', 'month', 'target', 'note', 'updatedAt'],
   /* کاربران QC: نام، رمز، نقش، فعال و دسترسی‌ها (بند ۵) */
   QC_Users: ['id', 'name', 'password', 'role', 'active', 'exts', 'agents', 'teams', 'note'],
   /* نگاشت المان‌ها: نام فارسی و ستون اکسل، قابل ویرایش روی شیت (بند ۹) */
@@ -97,9 +100,9 @@ var QC_GAS_TAB_REV_KEY = 'QC_GAS_TAB_REV';
 var QC_GAS_TAB_PREFIX = 'qctab@';
 var QC_GAS_TAB_KEYS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
   'tickets', 'socials', 'callFeedbacks', 'callSituational', 'monthlyScores', 'agentActions', 'actionTypes', 'fiscalMonths', 'qcUsers',
-  'elements', 'reminders'];
+  'elements', 'reminders', 'ritTargets'];
 var QC_GAS_SMALL_TABS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
-  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements'];
+  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements', 'ritTargets'];
 var QC_GAS_CHANGE_HANDLER = 'crmqcOnSheetChange';
 /* کش نتیجه‌ی تحلیل‌ها: کلید = نسخه‌ی داده + کاربر + مسیر؛ با هر نوشتن باطل می‌شود. */
 var QC_GAS_ANALYSIS_PREFIX = 'qcan-sec2@';
@@ -600,6 +603,7 @@ function buildLocalSyncPayload_(db, session, revision) {
   var isAdmin = window.QCAccess.isAdmin(session);
   var scoped = isAdmin ? jsonSafe_(db) : jsonSafe_(window.QCAccess.scopeDb(db, session));
   scoped.callRaw = null;
+  scoped.ritRaw = null;
   if (isAdmin) {
     scoped.qcUsers = window.QCAccess.userMask(window.QCAccess.normalizeUsers(db));
   } else {
@@ -1404,6 +1408,7 @@ function makeSeedDatabase_() {
     reminders: [],
     registryCleared: false,
     fiscalMonths: [],
+    ritTargets: [],
     qcUsers: []
   });
 }
@@ -1426,6 +1431,7 @@ function normalizeDatabase_(db) {
   db.actionTypes = Array.isArray(db.actionTypes) ? db.actionTypes : undefined;
   db.reminders = Array.isArray(db.reminders) ? db.reminders : [];
   db.fiscalMonths = window.QCFiscal.normalizeMonths(db.fiscalMonths);
+  db.ritTargets = Array.isArray(db.ritTargets) ? db.ritTargets : [];
   db.qcUsers = Array.isArray(db.qcUsers) ? db.qcUsers : [];
   if (!db.settings.authMode) db.settings.authMode = 'auto';
   db.callImport = db.callImport || null;
@@ -1563,6 +1569,7 @@ function readDatabase_(ssOrFn, wanted, info) {
     agentActions: agentActions,
     actionTypes: actionTypes.length ? actionTypes : undefined,
     reminders: raw('reminders', function () { return rows(QC_GAS_SHEETS.reminders); }) || [],
+    ritTargets: raw('ritTargets', function () { return rows(QC_GAS_SHEETS.ritTargets); }) || [],
     settings: settings,
     lists: lists
   };
@@ -1781,6 +1788,9 @@ function writeDatabaseDiffFp_(ss, beforeJson, after, forceAll, only) {
   });
   if (changed('monthlyScores')) write('monthlyScores', function () {
     return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.monthlyScores), rows('monthlyScores') || [], units.monthlyScores, 'Monthly_Scores');
+  });
+  if (changed('ritTargets')) write('ritTargets', function () {
+    return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.ritTargets), rows('ritTargets') || [], units.ritTargets, 'Rit_Targets');
   });
   if (changed('qcAgents')) write('qcAgents', function () {
     return writeRowsSheet_(sheets[QC_GAS_SHEETS.qcAgents], rows('qcAgents') || [], units.qcAgents, 'QC_Agents');

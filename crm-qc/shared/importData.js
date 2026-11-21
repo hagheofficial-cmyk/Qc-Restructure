@@ -326,6 +326,7 @@ function monthlyScoreFiles(db, files, options) {
     const nowIso = new Date().toISOString();
     parsed.forEach(r => { r.importedAt = nowIso; });
     const changes = monthlyScores(db, parsed, mode, name, ch);
+    storeRawRows(db, name, rows);
     const dates = parsed.flatMap(r => [r.periodFrom, r.periodTo]).filter(Boolean).sort();
     results.push({
       name, ok: true, kind: ch === 'ticket' ? 'ticket_monthly' : 'social_monthly',
@@ -345,6 +346,19 @@ function monthlyScoreFiles(db, files, options) {
     }
   };
 }
+/* ذخیره‌ی ردیف‌های خام اکسل (همان‌طور که آپلود شده‌اند) برای بازکردن دقیق در داشبورد آمار ریت.
+ * key = نام فایل منبع. از ذخیره‌ی بیش از حد بزرگ جلوگیری می‌کند. */
+const RIT_RAW_MAX_ROWS = 20000;
+function storeRawRows(db, name, rows) {
+  if (!name || !Array.isArray(rows) || !rows.length) return;
+  db.ritRaw = db.ritRaw || {};
+  if (db.ritRaw[name]) return; // به‌روزرسانی‌های بعدی همان فایل همان منبع می‌ماند
+  db.ritRaw[name] = {
+    headers: Object.keys(rows[0] || {}),
+    rows: rows.slice(0, RIT_RAW_MAX_ROWS)
+  };
+}
+
 function callFiles(db, files, options) {
   options = options || {};
   const mode = options.mode || 'append';
@@ -391,6 +405,7 @@ function callFiles(db, files, options) {
       };
     }
     const changes = calls(db, parsed.map(r => Object.assign({ sourceFile: item.name }, r)), mode, item.name);
+    storeRawRows(db, item.name, item.rows);
     resultsByIdx[item.idx] = {
       name: item.name, ok: true, kind: 'fixed', type: item.formType,
       count: parsed.length, periodFrom: range.from, periodTo: range.to,
@@ -442,6 +457,7 @@ function callFiles(db, files, options) {
       continue;
     }
     const changes = situational(db, parsed, mode, item.name);
+    storeRawRows(db, item.name, item.rows);
     resultsByIdx[item.idx] = {
       name: item.name, ok: true, kind: 'situational', type: item.formType,
       count: parsed.length, periodFrom: pFrom, periodTo: pTo, pairedFixedFile: pairedFile,
@@ -509,6 +525,7 @@ function deleteSourceFile(db, fileName, kind) {
     throw e;
   }
   const k = String(kind || '').trim().toLowerCase();
+  if (db.ritRaw) delete db.ritRaw[name];
   db.callFeedbacks = Array.isArray(db.callFeedbacks) ? db.callFeedbacks : [];
   db.callSituational = Array.isArray(db.callSituational) ? db.callSituational : [];
   db.monthlyScores = Array.isArray(db.monthlyScores) ? db.monthlyScores : [];

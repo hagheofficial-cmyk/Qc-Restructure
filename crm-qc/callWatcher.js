@@ -115,6 +115,7 @@ function readFormFile(filePath, db) {
   return {
     kind: 'fixed',
     rows: parsed.map((r) => Object.assign({ sourceFile: baseName }, r)),
+    rawRows: rows,
     type: cls.formType,
     count: parsed.length,
     periodFrom: range.from,
@@ -247,6 +248,11 @@ function scanOnce(db, saveCallback, log) {
               else if (fx.type === 'account') db.callRaw.accRawData = fresh;
               else db.callRaw.mlmRawData = fresh;
             }
+            /* ردیف‌های خام اکسل برای بازکردن دقیق در داشبورد آمار ریت */
+            if (fx.rawRows && fx.rawRows.length) {
+              db.ritRaw = db.ritRaw || {};
+              if (!db.ritRaw[f]) db.ritRaw[f] = { headers: Object.keys(fx.rawRows[0] || {}), rows: fx.rawRows.slice(0, 20000) };
+            }
             changed = true; delta[fx.type] = (delta[fx.type] || 0) + fx.count;
             newFiles[f] = sig;
             log && log(base(f), fx.count + ' ردیف ثابت (' + fx.type + ')');
@@ -281,6 +287,10 @@ function scanOnce(db, saveCallback, log) {
         });
         if (parsed.length) {
           ImportData.situational(db, parsed, 'append', item.f);
+          if (fx.rawRows && fx.rawRows.length) {
+            db.ritRaw = db.ritRaw || {};
+            if (!db.ritRaw[item.f]) db.ritRaw[item.f] = { headers: Object.keys(fx.rawRows[0] || {}), rows: fx.rawRows.slice(0, 20000) };
+          }
           changed = true;
           delta['situational_' + fx.type] = (delta['situational_' + fx.type] || 0) + parsed.length;
           newFiles[item.f] = item.sig;
@@ -304,6 +314,10 @@ function scanOnce(db, saveCallback, log) {
           const nowIso = new Date().toISOString();
           parsed.forEach((r) => { r.importedAt = nowIso; });
           ImportData.monthlyScores(db, parsed, 'append', item.f, fx.type);
+          if (fx.rawRows && fx.rawRows.length) {
+            db.ritRaw = db.ritRaw || {};
+            if (!db.ritRaw[item.f]) db.ritRaw[item.f] = { headers: Object.keys(fx.rawRows[0] || {}), rows: fx.rawRows.slice(0, 20000) };
+          }
           changed = true;
           delta['monthly_' + fx.type] = (delta['monthly_' + fx.type] || 0) + parsed.length;
           newFiles[item.f] = item.sig;

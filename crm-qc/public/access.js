@@ -26,12 +26,12 @@ const digits = (v) => (C && C.faToEn ? C.faToEn(text(v)) : text(v).replace(/[۰-
 /* صفحه‌هایی که فقط مدیر می‌بیند (بند ۶) و صفحه‌های عملیاتی مشترک. */
 const ADMIN_ROUTES = ['criteria', 'directory', 'agents', 'data', 'qcadmin', 'sheets'];
 const SHARED_ROUTES = ['dashboard', 'tickets', 'tickets-new', 'socials', 'socials-new', 'reports',
-  'portfolio', 'expert-ref', 'expert-review', 'call-analysis', 'callreport', 'reminders'];
+  'portfolio', 'expert-ref', 'expert-review', 'call-analysis', 'callreport', 'reminders', 'ritstats'];
 
 /* اندپوینت‌هایی که همیشه مخصوص مدیرند (بدون توجه به نقش درخواست‌کننده). */
 const ADMIN_API = ['/api/criteria', '/api/settings', '/api/qc-users', '/api/fiscal-months', '/api/elements',
   '/api/backup', '/api/drive-backups', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
-  '/api/action-types', '/api/agents'];
+  '/api/action-types', '/api/agents', '/api/rit/targets'];
 
 /* خواندن‌هایی که برای صفحه‌های عملیاتیِ کارشناس QC لازم‌اند (با داده‌ی محدودشده)؛
  * وگرنه صفحه‌هایی مثل «پرونده کارشناس» و شمارنده‌های پایین صفحه با ۴۰۳ می‌افتند. */

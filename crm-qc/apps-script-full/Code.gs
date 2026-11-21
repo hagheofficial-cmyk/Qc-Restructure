@@ -2808,6 +2808,7 @@ function monthlyScoreFiles(db, files, options) {
     const nowIso = new Date().toISOString();
     parsed.forEach(r => { r.importedAt = nowIso; });
     const changes = monthlyScores(db, parsed, mode, name, ch);
+    storeRawRows(db, name, rows);
     const dates = parsed.flatMap(r => [r.periodFrom, r.periodTo]).filter(Boolean).sort();
     results.push({
       name, ok: true, kind: ch === 'ticket' ? 'ticket_monthly' : 'social_monthly',
@@ -2827,6 +2828,19 @@ function monthlyScoreFiles(db, files, options) {
     }
   };
 }
+/* ذخیره‌ی ردیف‌های خام اکسل (همان‌طور که آپلود شده‌اند) برای بازکردن دقیق در داشبورد آمار ریت.
+ * key = نام فایل منبع. از ذخیره‌ی بیش از حد بزرگ جلوگیری می‌کند. */
+const RIT_RAW_MAX_ROWS = 20000;
+function storeRawRows(db, name, rows) {
+  if (!name || !Array.isArray(rows) || !rows.length) return;
+  db.ritRaw = db.ritRaw || {};
+  if (db.ritRaw[name]) return; // به‌روزرسانی‌های بعدی همان فایل همان منبع می‌ماند
+  db.ritRaw[name] = {
+    headers: Object.keys(rows[0] || {}),
+    rows: rows.slice(0, RIT_RAW_MAX_ROWS)
+  };
+}
+
 function callFiles(db, files, options) {
   options = options || {};
   const mode = options.mode || 'append';
@@ -2873,6 +2887,7 @@ function callFiles(db, files, options) {
       };
     }
     const changes = calls(db, parsed.map(r => Object.assign({ sourceFile: item.name }, r)), mode, item.name);
+    storeRawRows(db, item.name, item.rows);
     resultsByIdx[item.idx] = {
       name: item.name, ok: true, kind: 'fixed', type: item.formType,
       count: parsed.length, periodFrom: range.from, periodTo: range.to,
@@ -2924,6 +2939,7 @@ function callFiles(db, files, options) {
       continue;
     }
     const changes = situational(db, parsed, mode, item.name);
+    storeRawRows(db, item.name, item.rows);
     resultsByIdx[item.idx] = {
       name: item.name, ok: true, kind: 'situational', type: item.formType,
       count: parsed.length, periodFrom: pFrom, periodTo: pTo, pairedFixedFile: pairedFile,
@@ -2991,6 +3007,7 @@ function deleteSourceFile(db, fileName, kind) {
     throw e;
   }
   const k = String(kind || '').trim().toLowerCase();
+  if (db.ritRaw) delete db.ritRaw[name];
   db.callFeedbacks = Array.isArray(db.callFeedbacks) ? db.callFeedbacks : [];
   db.callSituational = Array.isArray(db.callSituational) ? db.callSituational : [];
   db.monthlyScores = Array.isArray(db.monthlyScores) ? db.monthlyScores : [];
@@ -3615,12 +3632,12 @@ const digits = (v) => (C && C.faToEn ? C.faToEn(text(v)) : text(v).replace(/[۰-
 /* صفحه‌هایی که فقط مدیر می‌بیند (بند ۶) و صفحه‌های عملیاتی مشترک. */
 const ADMIN_ROUTES = ['criteria', 'directory', 'agents', 'data', 'qcadmin', 'sheets'];
 const SHARED_ROUTES = ['dashboard', 'tickets', 'tickets-new', 'socials', 'socials-new', 'reports',
-  'portfolio', 'expert-ref', 'expert-review', 'call-analysis', 'callreport', 'reminders'];
+  'portfolio', 'expert-ref', 'expert-review', 'call-analysis', 'callreport', 'reminders', 'ritstats'];
 
 /* اندپوینت‌هایی که همیشه مخصوص مدیرند (بدون توجه به نقش درخواست‌کننده). */
 const ADMIN_API = ['/api/criteria', '/api/settings', '/api/qc-users', '/api/fiscal-months', '/api/elements',
   '/api/backup', '/api/drive-backups', '/api/data', '/api/sheets', '/api/calls/import', '/api/calls/meta',
-  '/api/action-types', '/api/agents'];
+  '/api/action-types', '/api/agents', '/api/rit/targets'];
 
 /* خواندن‌هایی که برای صفحه‌های عملیاتیِ کارشناس QC لازم‌اند (با داده‌ی محدودشده)؛
  * وگرنه صفحه‌هایی مثل «پرونده کارشناس» و شمارنده‌های پایین صفحه با ۴۰۳ می‌افتند. */
@@ -4550,6 +4567,341 @@ return {
 });
 
 
+
+/* ---- shared/ritStats.js ---- */
+/* ritStats.js — آمار ریت کارشناسان کیوسی از فایل‌های آپلودشده + معیار تارگت ماهانه تیم‌ها
+ *
+ * مدل داده:
+ *  - callFeedbacks: هر ردیف = یک ریت تماس؛ qcAgent = نام کارشناس کیوسی، expertName = کارشناس فروش،
+ *    reviewDate = تاریخ بررسی، formType = tele|account|mlm، team، sourceFile.
+ *  - tickets / socials: هر ردیف = یک ارزیابی (ریت تیکت/سوشال)؛ qcAgent، agentName، reviewDate، team.
+ *  - monthlyScores: ردیف‌های ماهانه تیکت/سوشال؛ خودشان کارشناس کیوسی ندارند — فقط در جمع تیم‌ها لحاظ می‌شوند.
+ *
+ * ماه مالی: هر «ماه مالی X» بازه‌ی ۲۰ ماه (X-1) → ۱۹ ماه X است و مقدار/کد آن = ۲۱ ماه (X-1)
+ * به صورت YYYYMMDD (مثل ۱۴۰۵۰۵۲۱ برای «ماه مالی شهریور»).
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory(require('./calc.js'), require('./parseQc.js'), require('./fiscal.js'));
+  else root.QCRitStats = factory(root.QCCalc, root.QCParse, root.QCFiscal);
+})(globalThis, function (C, P, Fiscal) {
+  'use strict';
+
+  function norm(v) { return P.normName(v); }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function ymd(jy, jm, jd) { return String(jy) + pad2(jm) + pad2(jd); }
+  function text(v) { return v == null ? '' : String(v).trim(); }
+
+  function inRange(date, from, to) {
+    if (!date) return false;
+    if (from && date < from) return false;
+    if (to && date > to) return false;
+    return true;
+  }
+
+  /* ----------------------------------------------------------- ماه مالی */
+  /* اگر فهرست ماه‌های مالی خالی باشد، ۱۲ ماه «ماه مالی X» برای سال جلالی امروز ساخته می‌شود
+   * (۲۰ → ۱۹). مقدار هر ماه = YYYYMMDDِ ۲۱ ماه شروع (مثل ۱۴۰۵۰۵۲۱ برای شهریور). */
+  function ensureFiscalMonths(db, today) {
+    if (Array.isArray(db.fiscalMonths) && db.fiscalMonths.length) return { changed: false, months: db.fiscalMonths };
+    const t = C.parseDate(today || C.formatJalali(C.todayJalali()));
+    if (!t) return { changed: false, months: db.fiscalMonths || [] };
+    const months = [];
+    for (let x = 1; x <= 12; x++) {
+      const startMonth = C.jalaliMonthAdd(t.jy, x, -1);
+      const from = { jy: startMonth.jy, jm: startMonth.jm, jd: 20 };
+      const to = { jy: t.jy, jm: x, jd: 19 };
+      months.push({
+        id: ymd(startMonth.jy, startMonth.jm, 21),
+        name: 'ماه مالی ' + (C.MONTHS_FA[x - 1] || ''),
+        from: C.formatJalali(from),
+        to: C.formatJalali(to),
+        note: ''
+      });
+    }
+    db.fiscalMonths = Fiscal.normalizeMonths(months);
+    return { changed: true, months: db.fiscalMonths };
+  }
+
+  function monthById(db, id) {
+    return Fiscal.monthById(Fiscal.normalizeMonths(db.fiscalMonths), text(id));
+  }
+
+  /* ----------------------------------------------------------- منابع ریت */
+  /* همه‌ی ردیف‌های دارای کارشناس کیوسی را به شکلی یکسان نماینده‌سازی می‌کند. */
+  function ritRows(db) {
+    const out = [];
+    const push = (r, agent, qc, date, form, team, file, row, count) => {
+      if (!agent && !qc) return;
+      out.push({
+        agent: norm(agent), agentRaw: text(agent),
+        qc: norm(qc), qcRaw: text(qc),
+        date: text(date), form: text(form), team: text(team),
+        file: text(file), row: row == null ? 0 : row, count: count || 1
+      });
+    };
+    (db.callFeedbacks || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.reviewDate, r.formType, r.team, r.sourceFile, r.sourceRow, 1));
+    (db.tickets || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'ticket', r.team, r.sourceFile || '', 0, 1));
+    (db.socials || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'social', r.team, r.sourceFile || '', 0, 1));
+    /* ردیف‌های ماهانه (بدون کارشناس کیوسی) فقط در جمع تیم‌ها لحاظ می‌شوند */
+    (db.monthlyScores || []).forEach((r) => push(r, r.expertName, '', r.periodFrom, r.channel, r.team, r.sourceFile, r.sourceRow, r.evalCount || 1));
+    return out;
+  }
+
+  function teamList(rows) {
+    const set = new Set();
+    rows.forEach((r) => { if (r.team) set.add(r.team); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'fa'));
+  }
+
+  function matchTeam(rowTeam, wanted) {
+    if (!wanted) return true;
+    const list = Array.isArray(wanted) ? wanted : String(wanted).split(',').map((s) => s.trim()).filter(Boolean);
+    if (!list.length) return true;
+    return list.indexOf(rowTeam) >= 0;
+  }
+
+  /* ----------------------------------------------------------- آمار ریت */
+  function stats(db, opts) {
+    opts = opts || {};
+    const from = text(opts.from), to = text(opts.to);
+    const rows = ritRows(db).filter((r) => inRange(r.date, from, to)
+      && matchTeam(r.team, opts.team) && matchTeam(r.qc, opts.qcAgent));
+
+    const experts = new Map();
+    const agents = new Map();
+    const teams = new Map();
+    const totals = { all: 0, calls: 0, tickets: 0, socials: 0, withQc: 0 };
+
+    rows.forEach((r) => {
+      totals.all += r.count;
+      if (r.qc) totals.withQc += r.count;
+      if (r.form === 'tele' || r.form === 'account' || r.form === 'mlm') totals.calls += r.count;
+      else if (r.form === 'ticket') totals.tickets += r.count;
+      else if (r.form === 'social') totals.socials += r.count;
+
+      if (r.team) teams.set(r.team, (teams.get(r.team) || 0) + r.count);
+
+      if (!r.qc) return; // ردیف‌های ماهانه در تفکیک کارشناس کیوسی ندیده می‌شوند
+      let ex = experts.get(r.qc);
+      if (!ex) { ex = { qc: r.qc, total: 0, byAgent: new Map() }; experts.set(r.qc, ex); }
+      ex.total += r.count;
+
+      let ag = ex.byAgent.get(r.agent);
+      if (!ag) { ag = { agent: r.agent, team: r.team, total: 0, forms: {}, files: new Map() }; ex.byAgent.set(r.agent, ag); }
+      ag.total += r.count;
+      ag.forms[r.form] = (ag.forms[r.form] || 0) + r.count;
+      if (r.file) ag.files.set(r.file, (ag.files.get(r.file) || 0) + 1);
+
+      if (!agents.has(r.agent)) agents.set(r.agent, r.team);
+    });
+
+    const agentList = Array.from(agents.entries())
+      .map(([agent, team]) => ({ agent: agent, team: team }))
+      .sort((a, b) => a.agent.localeCompare(b.agent, 'fa'));
+
+    const expertList = Array.from(experts.values()).map((ex) => ({
+      qc: ex.qc,
+      total: ex.total,
+      byAgent: Array.from(ex.byAgent.values())
+        .map((ag) => ({
+          agent: ag.agent, team: ag.team, total: ag.total, forms: ag.forms,
+          files: Array.from(ag.files.entries()).map(([file, count]) => ({ file: file, count: count }))
+        }))
+        .sort((a, b) => b.total - a.total || a.agent.localeCompare(b.agent, 'fa'))
+    })).sort((a, b) => b.total - a.total || a.qc.localeCompare(b.qc, 'fa'));
+
+    return {
+      range: { from: from, to: to },
+      totals: Object.assign({ experts: expertList.length }, totals),
+      experts: expertList,
+      agents: agentList,
+      teams: Array.from(teams.entries()).map(([team, total]) => ({ team: team, total: total })).sort((a, b) => b.total - a.total)
+    };
+  }
+
+  /* ----------------------------------------------------------- مرکز دیتا (فایل‌های آپلودشده) */
+  function files(db, opts) {
+    opts = opts || {};
+    const from = text(opts.from), to = text(opts.to), q = norm(opts.q);
+    const map = new Map();
+    const ensure = (name, kind, type) => {
+      if (!map.has(name)) map.set(name, { name: name, kind: kind, type: type, rows: 0, from: '', to: '', teams: new Set(), qcAgents: new Set(), agents: new Set() });
+      return map.get(name);
+    };
+    const touch = (rec, r) => {
+      rec.rows += (r.count || 1);
+      if (r.date) {
+        if (!rec.from || r.date < rec.from) rec.from = r.date;
+        if (!rec.to || r.date > rec.to) rec.to = r.date;
+      }
+      if (r.team) rec.teams.add(r.team);
+      if (r.qc) rec.qcAgents.add(r.qc);
+      if (r.agent) rec.agents.add(r.agent);
+    };
+    ritRows(db).forEach((r) => {
+      if (!r.file) return;
+      let kind = 'form', type = r.form;
+      if (r.form === 'ticket' || r.form === 'social') { kind = r.form === 'ticket' ? 'ticket' : 'social'; type = r.form; }
+      else if (r.form === 'tele' || r.form === 'account' || r.form === 'mlm') { kind = 'form'; }
+      else { kind = 'monthly'; }
+      touch(ensure(r.file, kind, type), r);
+    });
+
+    let list = Array.from(map.values()).map((rec) => ({
+      name: rec.name, kind: rec.kind, type: rec.type, rows: rec.rows,
+      from: rec.from, to: rec.to,
+      teams: Array.from(rec.teams).sort((a, b) => a.localeCompare(b, 'fa')),
+      qcAgents: Array.from(rec.qcAgents).sort((a, b) => a.localeCompare(b, 'fa')),
+      agents: Array.from(rec.agents).sort((a, b) => a.localeCompare(b, 'fa'))
+    }));
+
+    if (from || to) {
+      list = list.filter((f) => {
+        if (from && f.to && f.to < from) return false;
+        if (to && f.from && f.from > to) return false;
+        if (from && to && (!f.from && !f.to)) return false;
+        return true;
+      });
+    }
+    if (opts.team) {
+      const wanted = String(opts.team).split(',').map((s) => s.trim()).filter(Boolean);
+      if (wanted.length) list = list.filter((f) => wanted.some((t) => f.teams.indexOf(t) >= 0));
+    }
+    if (q) list = list.filter((f) => norm(f.name).indexOf(q) >= 0);
+
+    const sortKey = text(opts.sort) || 'mtime';
+    const dir = opts.dir === 'asc' ? 1 : -1;
+    list.sort((a, b) => {
+      let va, vb;
+      if (sortKey === 'rows') { va = a.rows; vb = b.rows; }
+      else if (sortKey === 'from') { va = a.from || ''; vb = b.from || ''; }
+      else if (sortKey === 'to') { va = a.to || ''; vb = b.to || ''; }
+      else if (sortKey === 'team') { va = a.teams.join('،') || ''; vb = b.teams.join('،') || ''; }
+      else { va = a.name; vb = b.name; }
+      if (va < vb) return -1 * dir;
+      if (va > vb) return 1 * dir;
+      return 0;
+    });
+    return { files: list, total: list.length };
+  }
+
+  /* ----------------------------------------------------------- ردیف‌های خام اکسل (دقیقاً همان‌طور که آپلود شده‌اند) */
+  const QC_COLS = ['qc_expert_name', 'qc_agent', 'qcagent', 'کارشناس کیوسی', 'کارشناس qc', 'کنترل کیفیت', 'carscholar kiosi'];
+  const AGENT_COLS = ['expert_name', 'expertname', 'tele_expert_name', 'account_expert_name', 'account expert name', 'acc_expert_name', 'کارشناس', 'نام کارشناس', 'کارشناس فروش'];
+  const DATE_COLS = ['review_date', 'reviewdate', 'تاریخ بررسی', 'form_created_date', 'form created date', 'action_date', 'action date'];
+  const TEAM_COLS = ['team', 'team_name', 'تیم'];
+
+  function findCol(headers, candidates) {
+    const keys = headers || [];
+    for (const cand of candidates) {
+      const hit = keys.find((k) => norm(k) === norm(cand));
+      if (hit) return hit;
+    }
+    return '';
+  }
+
+  function rawRows(db, opts) {
+    opts = opts || {};
+    const raw = db.ritRaw || {};
+    let entries = [];
+    if (opts.file) {
+      if (raw[opts.file]) entries.push([opts.file, raw[opts.file]]);
+    } else {
+      entries = Object.keys(raw).map((k) => [k, raw[k]]);
+    }
+    const from = text(opts.from), to = text(opts.to);
+    const qcWant = norm(opts.qc), agentWant = norm(opts.agent), teamWant = text(opts.team);
+    const allowed = (opts.allowedAgents && opts.allowedAgents.length) ? opts.allowedAgents.map(norm) : null;
+    const limit = Math.max(1, Math.min(2000, Number(opts.limit) || 500));
+
+    const out = [];
+    let total = 0;
+    entries.forEach(([name, entry]) => {
+      const headers = entry.headers || [];
+      const qcCol = findCol(headers, QC_COLS);
+      const agentCol = findCol(headers, AGENT_COLS);
+      const dateCol = findCol(headers, DATE_COLS);
+      const teamCol = findCol(headers, TEAM_COLS);
+      (entry.rows || []).forEach((cells, i) => {
+        total++;
+        if (qcWant && !(qcCol && norm(cells[qcCol]) === qcWant)) return;
+        if (agentWant && !(agentCol && norm(cells[agentCol]) === agentWant)) return;
+        if (allowed && agentCol && !allowed.some((a) => norm(cells[agentCol]) === a)) return;
+        if (teamWant && !(teamCol && norm(cells[teamCol]) === norm(teamWant))) return;
+        if (from || to) {
+          const d = dateCol ? P.cleanQcDate(cells[dateCol]) : '';
+          if (!inRange(d, from, to)) return;
+        }
+        if (out.length >= limit) return;
+        out.push({ row: (i + 1), file: name, cells: cells });
+      });
+    });
+    const headers = out.length ? Object.keys(out[0].cells) : (entries[0] ? (entries[0][1].headers || []) : []);
+    return { headers: headers, rows: out, total: total, limit: limit };
+  }
+
+  /* ----------------------------------------------------------- معیار تارگت ماهانه تیم‌ها */
+  function targets(db) {
+    return (db.ritTargets || []).map((t) => Object.assign({}, t));
+  }
+
+  function saveTarget(db, row) {
+    const team = text(row.team), month = text(row.month);
+    const target = Math.max(0, Math.floor(Number(row.target) || 0));
+    if (!team || !month) return { error: 'تیم و ماه مالی الزامی هستند' };
+    const list = db.ritTargets || (db.ritTargets = []);
+    const hit = list.find((t) => t.team === team && t.month === month);
+    if (hit) {
+      hit.target = target;
+      hit.note = text(row.note);
+      hit.updatedAt = new Date().toISOString();
+    } else {
+      list.push({
+        id: 'rt' + (list.length + 1) + '_' + Math.random().toString(36).slice(2, 8),
+        team: team, month: month, target: target,
+        note: text(row.note), updatedAt: new Date().toISOString()
+      });
+    }
+    return { ok: true, targets: targets(db) };
+  }
+
+  function removeTarget(db, id) {
+    db.ritTargets = (db.ritTargets || []).filter((t) => t.id !== id);
+    return { ok: true, targets: targets(db) };
+  }
+
+  /* جمع ریت‌های انجام‌شده در یک ماه مالی برای یک تیم (تماس + سوشال + تیکت) */
+  function monthTeamTotal(db, monthId, team) {
+    const month = monthById(db, monthId);
+    if (!month) return 0;
+    const rows = ritRows(db).filter((r) => inRange(r.date, month.from, month.to) && (!team || r.team === team));
+    return rows.reduce((sum, r) => sum + (r.count || 1), 0);
+  }
+
+  function targetsWithProgress(db) {
+    return targets(db).map((t) => {
+      const actual = monthTeamTotal(db, t.month, t.team);
+      return Object.assign({}, t, { actual: actual, pct: t.target > 0 ? Math.min(100, Math.round((actual / t.target) * 100)) : (actual > 0 ? 100 : 0) });
+    });
+  }
+
+  return {
+    ensureFiscalMonths: ensureFiscalMonths,
+    monthById: monthById,
+    ritRows: ritRows,
+    stats: stats,
+    files: files,
+    rawRows: rawRows,
+    targets: targets,
+    saveTarget: saveTarget,
+    removeTarget: removeTarget,
+    monthTeamTotal: monthTeamTotal,
+    targetsWithProgress: targetsWithProgress,
+    QC_COLS: QC_COLS, AGENT_COLS: AGENT_COLS, DATE_COLS: DATE_COLS, TEAM_COLS: TEAM_COLS
+  };
+});
+
+
 /* ---- Initial reference data; copied into tabs only by setupStandaloneApp. ---- */
 window.QC_SEED = {"version":1,"agents":[{"id":1,"ext":3073,"name":"مبینا سیدآبادی","team":"Tele sales","active":true},{"id":2,"ext":3082,"name":"حامد میرزایی","team":"Tele sales","active":true},{"id":3,"ext":3086,"name":"محمد توجهی","team":"Tele sales","active":true},{"id":4,"ext":3090,"name":"هلیا هنرکار","team":"Tele sales","active":true},{"id":5,"ext":3095,"name":"مهناز جبارزاده","team":"Tele sales","active":true},{"id":6,"ext":3097,"name":"جواهر باکودزفولی","team":"Tele sales","active":true},{"id":7,"ext":3109,"name":"پریناز ناظمیان پور","team":"Tele sales","active":true},{"id":8,"ext":3110,"name":"آزاده فیروزی","team":"Tele sales","active":true},{"id":9,"ext":3127,"name":"سجاد موسوی","team":"Tele sales","active":true},{"id":10,"ext":3129,"name":"محمدایلیا ممانی","team":"Tele sales","active":true},{"id":11,"ext":3132,"name":"بردیا جانفشان","team":"Tele sales","active":true},{"id":12,"ext":3136,"name":"آتوسا آرامی","team":"Tele sales","active":true},{"id":13,"ext":3140,"name":"آتنا نوربخش","team":"Tele sales","active":true},{"id":14,"ext":3145,"name":"یگانه ویسی","team":"Tele sales","active":true},{"id":15,"ext":3165,"name":"مهتاب چراغی","team":"Tele sales","active":true},{"id":16,"ext":3196,"name":"محمدمهدی علیپور","team":"Tele sales","active":true},{"id":17,"ext":3204,"name":"هانیه معزز","team":"Tele sales","active":true},{"id":18,"ext":3212,"name":"آسیه احمدی فر","team":"Tele sales","active":true},{"id":19,"ext":3214,"name":"مهرداد سعیدمهدوی","team":"Tele sales","active":true},{"id":20,"ext":3220,"name":"آرزو محمودکلایه","team":"Tele sales","active":true},{"id":21,"ext":3222,"name":"صبا یاری","team":"Tele sales","active":true},{"id":22,"ext":3226,"name":"مریم رئوف","team":"Tele sales","active":true},{"id":23,"ext":3238,"name":"محدثه کریمی","team":"Tele sales","active":true},{"id":24,"ext":3239,"name":"سارا زرآینه","team":"Tele sales","active":true},{"id":25,"ext":3241,"name":"سحر ثامنی","team":"Tele sales","active":true},{"id":26,"ext":3242,"name":"زهرا شجاعی","team":"Tele sales","active":true},{"id":27,"ext":3244,"name":"صدیقه هوشمندی","team":"Tele sales","active":true},{"id":28,"ext":3258,"name":"امیررادمان رشیدی","team":"Tele sales","active":true},{"id":29,"ext":3259,"name":"مهسا موسوی","team":"Tele sales","active":true},{"id":30,"ext":3266,"name":"حامد جبروتی","team":"Tele sales","active":true},{"id":31,"ext":3268,"name":"نرگس پورخلیلی","team":"Tele sales","active":true},{"id":32,"ext":3274,"name":"لیلا بیاتی","team":"Tele sales","active":true},{"id":33,"ext":3022,"name":"رعنا غیاثی‌نژاد","team":"MLM","active":true},{"id":34,"ext":3246,"name":"محمد بوئینی","team":"MLM","active":true},{"id":35,"ext":3249,"name":"شاهین حسنی زاد","team":"MLM","active":true},{"id":36,"ext":3065,"name":"نیوشا موسوی","team":"MLM","active":true},{"id":37,"ext":3265,"name":"پوریا لرستانی","team":"MLM","active":true},{"id":38,"ext":3172,"name":"الهه عسگری","team":"MLM","active":true},{"id":39,"ext":3173,"name":"سمیرا شکیب","team":"MLM","active":true},{"id":40,"ext":3248,"name":"سپهر فلاح دوست بدایی","team":"MLM","active":true},{"id":41,"ext":3245,"name":"مائده بهنامی‌فر","team":"MLM","active":true},{"id":42,"ext":3146,"name":"الهام شمس نیا","team":"Account","active":true},{"id":43,"ext":3111,"name":"ریحانه روح بخش","team":"Account","active":true},{"id":44,"ext":3081,"name":"سیما معصومی","team":"Account","active":true},{"id":45,"ext":3118,"name":"نرگس یوسفیان","team":"Account","active":true},{"id":46,"ext":3261,"name":"هانیه مظهری","team":"Account","active":true},{"id":47,"ext":3263,"name":"ترانه محمودی","team":"Account","active":true},{"id":48,"ext":3264,"name":"زینب میرزاده","team":"Account","active":true},{"id":49,"ext":3210,"name":"آیسان نورافکن","team":"Account","active":true},{"id":50,"ext":3155,"name":"پریا شیشه گر","team":"Account","active":true},{"id":51,"ext":3176,"name":"سیده متین سید حسینی","team":"Account","active":true},{"id":52,"ext":3067,"name":"عارفه ایزدان","team":"Account","active":true},{"id":53,"ext":3151,"name":"متین تدین خواه","team":"Account","active":true},{"id":54,"ext":3125,"name":"مریم بیات","team":"Account","active":true},{"id":55,"ext":3128,"name":"نیلوفر رنجبر","team":"Account","active":true},{"id":56,"ext":3069,"name":"آنیتا کرمانشاه","team":"Account","active":true},{"id":57,"ext":3079,"name":"زهرا میرزائی","team":"Account","active":true},{"id":58,"ext":3194,"name":"عاطفه گلباز","team":"Account","active":true},{"id":59,"ext":3103,"name":"مائده سرمدی","team":"Account","active":true},{"id":60,"ext":3122,"name":"محمدرضا محتشمیان کاشانی","team":"Account","active":true},{"id":61,"ext":3225,"name":"مینا فرنام","team":"Account","active":true},{"id":62,"ext":3106,"name":"هما میرزائی","team":"Account","active":true},{"id":63,"ext":3276,"name":"فاطمه حسنوند","team":"Account","active":true},{"id":64,"ext":3275,"name":"شادی قنبری","team":"Account","active":true},{"id":65,"ext":3139,"name":"علیرضا قمی","team":"BNPL","active":true}],"qcAgents":["هادی","مبینا","شیدا","هانیه"],"lists":{"messengers":["بله","روبیکا","ایتا","تلگرام","واتساپ","پیامک"],"responseStatuses":["پاسخ داده شده","عدم پاسخ"],"delayReasons":["ندارد","اختلال سامانه یا پیام‌رسان","خارج از ساعت کاری","عدم دسترسی به اطلاعات ضروری","حجم بالای پیام‌ها","فراموشی یا عدم پیگیری","سایر"],"reasonVerdicts":["موجه و تأییدشده","بدون دلیل موجه","در انتظار بررسی"]},"settings":{"ticketWeights":[40,20,20,20],"socialWeights":[30,30,25,15],"slaMinutes":60,"workStart":"09:00","workEnd":"18:00","weekendDays":[4,5],"orgName":"سامانه یکپارچه کنترل کیفیت","scoreBands":[90,75,50],"defaultPreset":"cur"}};
 
@@ -5112,6 +5464,41 @@ function dispatch(method, url, body) {
   }
   if (name === 'dashboard' && method === 'GET') return R.dashboard(db, q);
 
+  /* ---- داشبورد آمار ریت (کارشناسان کیوسی) ---- */
+  if (name === 'rit') {
+    if (id === 'fiscal' && method === 'GET') {
+      const seeded = QCRitStats.ensureFiscalMonths(db);
+      if (seeded.changed) saveDb();
+      return clone({ months: db.fiscalMonths, seeded: seeded.changed });
+    }
+    if (id === 'stats' && method === 'GET') return clone(QCRitStats.stats(db, q));
+    if (id === 'rows' && method === 'GET') return clone(QCRitStats.rawRows(db, q));
+    if (id === 'files' && method === 'GET') return clone(QCRitStats.files(db, q));
+    if (id === 'targets') {
+      if (method === 'GET') {
+        return clone({ targets: QCRitStats.targetsWithProgress(db), canEdit: A.isAdmin(session) });
+      }
+      if (method === 'PUT') {
+        const out = QCRitStats.saveTarget(db, {
+          team: str(body.team), month: str(body.month),
+          target: Number(body.target) || 0, note: str(body.note)
+        });
+        if (out.error) bad(out.error);
+        saveDb();
+        return clone({ ok: true, targets: QCRitStats.targetsWithProgress(db) });
+      }
+      if (method === 'DELETE') {
+        const rest = url.slice(1).split('?')[0].split('/');
+        const targetId = rest[3] ? decodeURIComponent(rest[3]) : null;
+        if (!targetId) bad('شناسه‌ی تارگت الزامی است');
+        const out = QCRitStats.removeTarget(db, targetId);
+        saveDb();
+        return clone(out);
+      }
+    }
+    return bad('not found', 404);
+  }
+
   if (name === 'agents') {
     if (method === 'GET' && id == null) return clone(db.agents);
     if (method === 'DELETE' && id == null) { const result = Registry.removeAll(db, body); saveDb(); return result; }
@@ -5388,6 +5775,7 @@ var QC_GAS_SHEETS = {
   callReportExperts: 'Call_Report_Experts',
   callReportAccess: 'Call_Report_Access',
   fiscalMonths: 'Fiscal_Months',
+  ritTargets: 'Rit_Targets',
   qcUsers: 'QC_Users',
   elements: 'Elements',
   monthlySummary: 'Monthly_Summary'
@@ -5414,6 +5802,8 @@ var QC_GAS_SCHEMAS = {
   Call_Report_Access: ['json'],
   /* بازه‌های ماه مالی؛ مستقیم روی شیت قابل نوشتن‌اند (بند ۲) */
   Fiscal_Months: ['id', 'name', 'from', 'to', 'note'],
+  /* معیار تارگت ریت ماهانه‌ی تیم‌ها (آمار ریت) */
+  Rit_Targets: ['id', 'team', 'month', 'target', 'note', 'updatedAt'],
   /* کاربران QC: نام، رمز، نقش، فعال و دسترسی‌ها (بند ۵) */
   QC_Users: ['id', 'name', 'password', 'role', 'active', 'exts', 'agents', 'teams', 'note'],
   /* نگاشت المان‌ها: نام فارسی و ستون اکسل، قابل ویرایش روی شیت (بند ۹) */
@@ -5450,9 +5840,9 @@ var QC_GAS_TAB_REV_KEY = 'QC_GAS_TAB_REV';
 var QC_GAS_TAB_PREFIX = 'qctab@';
 var QC_GAS_TAB_KEYS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
   'tickets', 'socials', 'callFeedbacks', 'callSituational', 'monthlyScores', 'agentActions', 'actionTypes', 'fiscalMonths', 'qcUsers',
-  'elements', 'reminders'];
+  'elements', 'reminders', 'ritTargets'];
 var QC_GAS_SMALL_TABS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
-  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements'];
+  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements', 'ritTargets'];
 var QC_GAS_CHANGE_HANDLER = 'crmqcOnSheetChange';
 /* کش نتیجه‌ی تحلیل‌ها: کلید = نسخه‌ی داده + کاربر + مسیر؛ با هر نوشتن باطل می‌شود. */
 var QC_GAS_ANALYSIS_PREFIX = 'qcan-sec2@';
@@ -5953,6 +6343,7 @@ function buildLocalSyncPayload_(db, session, revision) {
   var isAdmin = window.QCAccess.isAdmin(session);
   var scoped = isAdmin ? jsonSafe_(db) : jsonSafe_(window.QCAccess.scopeDb(db, session));
   scoped.callRaw = null;
+  scoped.ritRaw = null;
   if (isAdmin) {
     scoped.qcUsers = window.QCAccess.userMask(window.QCAccess.normalizeUsers(db));
   } else {
@@ -6757,6 +7148,7 @@ function makeSeedDatabase_() {
     reminders: [],
     registryCleared: false,
     fiscalMonths: [],
+    ritTargets: [],
     qcUsers: []
   });
 }
@@ -6779,6 +7171,7 @@ function normalizeDatabase_(db) {
   db.actionTypes = Array.isArray(db.actionTypes) ? db.actionTypes : undefined;
   db.reminders = Array.isArray(db.reminders) ? db.reminders : [];
   db.fiscalMonths = window.QCFiscal.normalizeMonths(db.fiscalMonths);
+  db.ritTargets = Array.isArray(db.ritTargets) ? db.ritTargets : [];
   db.qcUsers = Array.isArray(db.qcUsers) ? db.qcUsers : [];
   if (!db.settings.authMode) db.settings.authMode = 'auto';
   db.callImport = db.callImport || null;
@@ -6916,6 +7309,7 @@ function readDatabase_(ssOrFn, wanted, info) {
     agentActions: agentActions,
     actionTypes: actionTypes.length ? actionTypes : undefined,
     reminders: raw('reminders', function () { return rows(QC_GAS_SHEETS.reminders); }) || [],
+    ritTargets: raw('ritTargets', function () { return rows(QC_GAS_SHEETS.ritTargets); }) || [],
     settings: settings,
     lists: lists
   };
@@ -7134,6 +7528,9 @@ function writeDatabaseDiffFp_(ss, beforeJson, after, forceAll, only) {
   });
   if (changed('monthlyScores')) write('monthlyScores', function () {
     return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.monthlyScores), rows('monthlyScores') || [], units.monthlyScores, 'Monthly_Scores');
+  });
+  if (changed('ritTargets')) write('ritTargets', function () {
+    return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.ritTargets), rows('ritTargets') || [], units.ritTargets, 'Rit_Targets');
   });
   if (changed('qcAgents')) write('qcAgents', function () {
     return writeRowsSheet_(sheets[QC_GAS_SHEETS.qcAgents], rows('qcAgents') || [], units.qcAgents, 'QC_Agents');
