@@ -565,6 +565,64 @@
 
   function portfolioAgents(data, q) { return combinedAgentReport(data, Object.assign({}, q, { includeEmpty: true })); }
 
+  /* ---------------------------- گزارش تجمیعی تیمی ----------------------------
+   * یک سطر برای هر تیم: نمره کل وزن‌دار + تعداد و میانگین نمره ریت‌های
+   * تیکت/سوشال/تماس/موقعیتی بر اساس کل ریت‌های تیم (نه میانگین میانگین‌ها). */
+  function combinedTeamReport(data, q) {
+    q = q || {};
+    var map = Object.create(null);
+    var teamSet = valueSet(q.team), agentSet = valueSet(q.agent);
+    var teamKeySet = teamSet ? new Set(Array.from(teamSet).map(P.teamKey)) : null;
+    function ensure(team) {
+      var name = team || 'بدون تیم';
+      if (!map[name]) map[name] = { name: name, tickets: [], socials: [], calls: [], situational: [], monthlyTickets: [], monthlySocials: [], agents: new Set() };
+      return map[name];
+    }
+    if (q.includeEmpty) (data.agents || []).forEach(function (a) {
+      if ((!teamKeySet || teamKeySet.has(P.teamKey(a.team))) && (!agentSet || agentSet.has(a.name))) ensure(a.team || 'بدون تیم');
+    });
+    filterRows(data.tickets, q, data).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.tickets.push(r); m.agents.add(r.agentName); });
+    filterRows(data.socials, q, data).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.socials.push(r); m.agents.add(r.agentName); });
+    filterCalls(data, q).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.calls.push(r); m.agents.add(r.expertName); });
+    filterSituational(data, q).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.situational.push(r); m.agents.add(r.expertName); });
+    filterMonthlyScores(data, q, 'ticket').forEach(function (r) { var m = ensure(rowTeam(data, r)); m.monthlyTickets.push(r); m.agents.add(r.expertName); });
+    filterMonthlyScores(data, q, 'social').forEach(function (r) { var m = ensure(rowTeam(data, r)); m.monthlySocials.push(r); m.agents.add(r.expertName); });
+
+    var weightsCfg = data && data.settings && data.settings.scoreWeights;
+    return Object.keys(map).map(function (key) {
+      var m = map[key], T = m.tickets, S = m.socials, Ph = m.calls, Sit = m.situational;
+      var effT = effectiveChannelScore(T, m.monthlyTickets);
+      var effS = effectiveChannelScore(S, m.monthlySocials);
+      var callAvgVal = avgScore(Ph);
+      var sitAvgVal = situationalAvgOf(Sit);
+      var weighted = computeWeightedScore({
+        callAvg: callAvgVal,
+        situationalAvg: sitAvgVal,
+        socialAvg: effS.avg,
+        ticketAvg: effT.avg
+      }, weightsCfg);
+      return {
+        name: m.name,
+        ticketCount: effT.count, ticketAvg: effT.avg, ticketSource: effT.source, ticketRedline: redlineCount(T, 'ticket'),
+        socialCount: effS.count, socialAvg: effS.avg, socialSource: effS.source, socialRedline: redlineCount(S, 'social'), socialSlaReal: rateSla(S),
+        socialUnanswered: S.filter(function (x) { return x.responseStatus === 'عدم پاسخ'; }).length,
+        callCount: Ph.length, callAvg: callAvgVal, callRedline: redlineCount(Ph, 'call'),
+        situationalCount: Sit.length,
+        situationalForms: Sit.reduce(function (s, r) { return s + (Number(r.formsCount) || 0); }, 0),
+        situationalAvg: sitAvgVal,
+        totalCount: effT.count + effS.count + Ph.length,
+        scoredCount: effT.scoredCount + effS.scoredCount + scoredRows(Ph).length,
+        agentsEvaluated: m.agents.size,
+        avgScore: weighted.score,
+        weightedScore: weighted.score,
+        activeWeight: weighted.activeWeight,
+        rawWeightedSum: weighted.rawWeightedSum,
+        weightedBreakdown: weighted
+      };
+    }).filter(function (x) { return q.includeEmpty || x.totalCount > 0 || x.situationalCount > 0; })
+      .sort(function (a, b) { return (b.avgScore === '' ? -1 : b.avgScore) - (a.avgScore === '' ? -1 : a.avgScore) || a.name.localeCompare(b.name, 'fa'); });
+  }
+
   /* ----------------------------------------------------- پرونده کارشناس */
   /** کارشناس با نام یا داخلی (ext) → جزئیات کامل */
   /* ---------------------------- گزارش تماس (ردیفی) + نمرهی اقلام کلی ---------------------------- */
@@ -1092,7 +1150,7 @@
     situationalAvgOf: situationalAvgOf, aggregateSituational: aggregateSituational,
     scoredRows: scoredRows,
     avgScore: avgScore, hasRedline: hasRedline, redlineDetails: redlineDetails, criteriaKeys: criteriaKeys, criterionStats: criterionStats, dataStatus: dataStatus, portfolioAgents: portfolioAgents,
-    monthlyBreakdown: monthlyBreakdown, combinedAgentReport: combinedAgentReport, agentByIdent: agentByIdent, agentProfile: agentProfile,
+    monthlyBreakdown: monthlyBreakdown, combinedAgentReport: combinedAgentReport, combinedTeamReport: combinedTeamReport, agentByIdent: agentByIdent, agentProfile: agentProfile,
     ticketReport: ticketReport, socialReport: socialReport, callReport: callReport, elementRates: elementRates, dashboard: dashboard,
     callAnalysis: callAnalysis,
     configuredCriteria: configuredCriteria, criterionLabel: criterionLabel

@@ -244,7 +244,10 @@ function dispatch(method, url, body) {
     const type = q.type || 'social';
     const level = q.level === 'team' ? 'team' : 'agent';
     const elements = R.elementRates ? R.elementRates(db, q) : undefined;
-    if (type === 'combined') return { type, level, rows: R.combinedAgentReport(db, q), elements };
+    if (type === 'combined') {
+      const rows = level === 'team' ? (R.combinedTeamReport ? R.combinedTeamReport(db, q) : R.combinedAgentReport(db, q)) : R.combinedAgentReport(db, q);
+      return { type, level, rows, elements };
+    }
     if (type === 'call' && R.callReport) {
       const crit = window.QCParse ? window.QCParse.resolver(db.settings.callCriteria) : {};
       const rep = R.callReport(db, level, q, crit);

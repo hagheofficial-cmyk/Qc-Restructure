@@ -28,6 +28,11 @@ function semantic(row, kind) {
 }
 function strongKey(row, kind, namespace) {
   if (kind === 'situational') return P.situationalRowKey ? P.situationalRowKey(row) : null;
+  if (kind === 'pivot') {
+    // پيورگ: هر سلول (کارشناس فروش × کارشناس کیوسی × ماه) یک ریت واحد است
+    return row.expertName && row.qcAgent && row.periodFrom
+      ? 'pivot:' + P.nameKey(row.expertName) + '|' + P.normName(row.qcAgent) + '|' + row.periodFrom : null;
+  }
   if (row.evaluationId) return kind + ':evaluation:' + (row.formType || '') + ':' + String(row.evaluationId) + ':' + (row.datasetId || namespace || '');
   if (kind === 'call' && row.sourceRow != null && row.sourceFile) return P.callRowKey(row);
   if (namespace && row.id != null) return kind + ':id:' + namespace + ':' + row.id;
@@ -433,11 +438,20 @@ function callFiles(db, files, options) {
     };
   }
 
+  /* دتپلیکت بر اساس **تاریخ بررسی** + هویت + محتوای ریت — ریت‌های تکراری که در
+   * فایل‌های هفته‌ی مختلف (مبدأِ متفاوت) تکرار می‌شوند، یک‌بار نگه می‌شود. دو ریتِ
+   * مستقلِ یک‌محتوا از یک فایلِ مبدأ هر دو نگه می‌شوند (محتوای متفاوت هم وهویتِ متفاوت
+   * در کلید است). */
   const seen = new Map(); const out = [];
   for (const r of db.callFeedbacks) {
-    const key = P.callRowKey(r);
-    if (key && seen.has(key)) continue;
-    if (key) seen.set(key, 1);
+    const key = P.ritKey(r, 'call') || P.callRowKey(r);
+    const file = String(r.sourceFile || '');
+    if (key && seen.has(key)) {
+      /* فقط اگر از فایلی غیر از مبدأِ قبلی است، تکرارِ هفتگی است */
+      const firstFile = seen.get(key);
+      if (firstFile && file && firstFile !== file) continue;
+    }
+    if (key && !seen.has(key)) seen.set(key, file || '');
     out.push(r);
   }
   db.callFeedbacks = out;

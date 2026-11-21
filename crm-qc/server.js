@@ -789,7 +789,10 @@ async function dispatchApi(req, res, pathname, query, body, session) {
       const q = { from: query.from, to: query.to, team: query.team, agent: query.agent, qc: query.qc, form: query.form };
       /* نرخ اقلام نسبت به کل دیتای فیلترشده — برای همه‌ی تب‌ها */
       const elements = QCReports.elementRates(db, q);
-      if (type === 'combined') return { type, level, rows: QCReports.combinedAgentReport(db, q), elements };
+      if (type === 'combined') {
+        const rows = level === 'team' ? QCReports.combinedTeamReport(db, q) : QCReports.combinedAgentReport(db, q);
+        return { type, level, rows, elements };
+      }
       if (type === 'call') {
         const rep = QCReports.callReport(db, level, q, P.resolver(db.settings.callCriteria));
         return { type: 'call', level, rows: rep.rows, calls: rep.calls, redlineRows: rep.redlineRows, situational: rep.situational, elements: Object.assign({}, elements, { call: rep.elements }) };

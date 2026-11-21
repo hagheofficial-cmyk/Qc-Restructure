@@ -244,3 +244,81 @@ test('آمار ریت: فایل پيورگ (ستون‌های کارشناس ک�
   assert.equal((db.ritPivots || []).length, 0);
   assert.equal(db.ritRaw['qc_army_pivote_2026-11-21T17_24_56.xlsx'], undefined);
 });
+
+/* ------------------------------------------------------------- دتپلیکت بر اساس تاریخ بررسی */
+test('آمار ریت: ریت‌های تکراری در فایل‌های هفته‌ی مختلف بر اساس تاریخ بررسی یک‌بار محاسبه می‌شوند', () => {
+  /* یک ریت با تاریخ بررسی ۱۴۰۵/۰۷/۲۱ در هر دو فایل این هفته و هفته بعدی می‌آید */
+  const week1Rows = [
+    { expert_name: 'کارشناس الف', score: 90, review_date: '1405/07/21', qc_expert_name: 'کیوسی الف', lead_name: 'شریک ۱', lead_phone: '09120000001' },
+    { expert_name: 'کارشناس الف', score: 70, review_date: '1405/07/22', qc_expert_name: 'کیوسی الف', lead_name: 'شریک ۲', lead_phone: '09120000002' }
+  ];
+  const week2Rows = [
+    { expert_name: 'کارشناس الف', score: 90, review_date: '1405/07/21', qc_expert_name: 'کیوسی الف', lead_name: 'شریک ۱', lead_phone: '09120000001' },
+    { expert_name: 'کارشناس الف', score: 85, review_date: '1405/07/28', qc_expert_name: 'کیوسی الف', lead_name: 'شریک ۳', lead_phone: '09120000003' }
+  ];
+  const db = fixture();
+  db.callFeedbacks = [];
+  /* آپلود فایل هفته اول (نام فایل نوع فرم را نشان می‌دهد) */
+  const r1 = I.callFiles(db, [{ name: 'week1-tele.xlsx', rows: week1Rows }], { mode: 'append' });
+  assert.equal(r1.ok, true);
+  assert.equal(db.callFeedbacks.length, 2, 'دو ریت در هفته اول');
+  /* آپلود فایل هفته دوم — ریت ۱۴۰۵/۰۷/۲۱ تکراری است */
+  const r2 = I.callFiles(db, [{ name: 'week2-tele.xlsx', rows: week2Rows }], { mode: 'append' });
+  assert.equal(r2.ok, true);
+  /* دتپلیکت در سطح کل اسtore انجام می‌شود (فایل مبدأ در هویت احتساب نمی‌شود):
+     ریتِ تکراری (تاریخ بررسی ۱۴۰۵/۰۷/۲۱) یک‌بار نگه می‌شود — مجموع ۳ ریت (۲ + ۱ جدید). */
+  assert.equal(db.callFeedbacks.length, 3, 'ریت تکراری در store ذخیره نمی‌شود');
+  /* آمار ریت هم همان تعداد را می‌بیند */
+  const stats = Rit.stats(db, { from: '1405/07/20', to: '1405/08/19' });
+  const ex = stats.experts.find((q) => q.qc === 'کیوسی الف');
+  assert.equal(ex.total, 3, 'آمار ریت فقط ریت‌های یک‌تای با تاریخ بررسی مختلف را می‌شمارند');
+  /* ریت‌های مستقلِ هم‌تاریخ (محتوای متفاوت — نمره متفاوت) با هم تلفیق نمی‌شوند */
+  const db2 = fixture(); db2.callFeedbacks = [];
+  I.callFiles(db2, [{ name: 'same-day-tele.xlsx', rows: [
+    { expert_name: 'کارشناس الف', score: 100, review_date: '1405/07/21', qc_expert_name: 'کیوسی الف', lead_name: 'شریک الف', lead_phone: '09120000010' },
+    { expert_name: 'کارشناس الف', score: 40, review_date: '1405/07/21', qc_expert_name: 'کیوسی الف', lead_name: 'شریک ب', lead_phone: '09120000011' }
+  ] }], { mode: 'append' });
+  assert.equal(db2.callFeedbacks.length, 2, 'دو ریت مستقل با تاریخ بررسی یکسان و محتوای متفاوت هر دو نگه می‌شوند');
+});
+
+/* ------------------------------------------------------------- گزارش تیمی */
+test('آمار ریت: گزارش تجمیعی تیمی — نمره و تعداد ریت تیکت/سوشال/تماس هر تیم در هفته', () => {
+  const R = require('../shared/reports');
+  const db = fixture();
+  db.tickets = [
+    { id: 1, agentName: 'کارشناس الف', team: 'Tele Sales', reviewDate: '1405/07/21', score: 80, qcAgent: 'کیوسی الف', ticketCode: 'T-1' },
+    { id: 2, agentName: 'کارشناس الف', team: 'Tele Sales', reviewDate: '1405/07/22', score: 60, qcAgent: 'کیوسی الف', ticketCode: 'T-2' },
+    { id: 3, agentName: 'کارشناس ب', team: 'Account', reviewDate: '1405/07/23', score: 90, qcAgent: 'کیوسی ب', ticketCode: 'T-3' }
+  ];
+  db.socials = [
+    { id: 1, agentName: 'کارشناس الف', team: 'Tele Sales', reviewDate: '1405/07/21', score: 70, qcAgent: 'کیوسی الف', responseStatus: 'پاسخ‌داده‌شده' }
+  ];
+  db.callFeedbacks = [
+    { expertName: 'کارشناس الف', team: 'Tele Sales', reviewDate: '1405/07/20', formType: 'tele', score: 75, qcAgent: 'کیوسی الف' },
+    { expertName: 'کارشناس ب', team: 'Account', reviewDate: '1405/07/24', formType: 'account', score: 85, qcAgent: 'کیوسی ب' }
+  ];
+  const rows = R.combinedTeamReport(db, { from: '1405/07/20', to: '1405/08/19' });
+  assert.equal(rows.length, 2, 'دو تیم در گزارش تیمی');
+  const tele = rows.find((r) => r.name === 'Tele Sales');
+  assert.equal(tele.ticketCount, 2, '۲ ریت تیکت برای تیم Tele Sales');
+  assert.equal(tele.socialCount, 1, '۱ ریت سوشال برای تیم Tele Sales');
+  assert.equal(tele.callCount, 1, '۱ ریت تماس برای تیم Tele Sales');
+  assert.equal(tele.totalCount, 4, 'مجموع ریت تیم Tele Sales');
+  assert.ok(tele.avgScore !== '' && tele.avgScore > 0, 'نمره کل وزن‌دار تیم محاسبه می‌شود');
+  const acc = rows.find((r) => r.name === 'Account');
+  assert.equal(acc.ticketCount, 1);
+  assert.equal(acc.callCount, 1);
+  assert.equal(acc.totalCount, 2);
+  assert.equal(acc.agentsEvaluated, 1, 'یک کارشناس در تیم Account ارزیابی شده');
+});
+
+/* ------------------------------------------------------------- برچسب ماه مالی برای بازه */
+test('آمار ریت: fiscalLabelForRange ماه مالی‌ی با بیشترین هم‌پوشانی بازه را برمی‌گرداند', () => {
+  const db = fixture();
+  Rit.ensureFiscalMonths(db, '1405/11/21');
+  const label = Rit.fiscalLabelForRange(db, '1405/07/20', '1405/08/19');
+  assert.equal(label, 'ماه مالی آبان', 'بازه ۱۴۰۵/۰۷/۲۰–۱۴۰۵/۰۸/۱۹ در ماه مالی آبان است');
+  const label2 = Rit.fiscalLabelForRange(db, '1405/08/20', '1405/09/19');
+  assert.equal(label2, 'ماه مالی آذر');
+  assert.equal(Rit.fiscalLabelForRange(db, '', ''), '');
+});

@@ -636,6 +636,44 @@ function callRowKey(row) {
   return identity ? JSON.stringify([row.sourceFile, row.formType, identity, cleanQcDate(row.reviewDate) || String(row.reviewDate || ''), nameKeyOf(row.expertName), String(row.leadPhone || ''), cleanQcDate(row.callDate) || String(row.callDate || '')]) : null;
 }
 
+/* ریتِ یک فرم: هویت ریتِ مستقل از فایل مبدأ — بر اساس **تاریخ بررسی** (مهمی‌ترین
+ * بخش) + کارشناس + کارشناس کیوسی + فرم + هویت پیشنهادی (شماره شریک برای تماس،
+ * کد تیکت برای تیکت). همین ریت اگر همزمان در فایل این هفته و هفته بعدی باشد
+ * یک‌بار محاسبه می‌شود. */
+function ritKey(row, kind) {
+  kind = kind || 'call';
+  const date = cleanQcDate(row.reviewDate) || String(row.reviewDate || '');
+  if (!date) return null;
+  const agent = kind === 'call' ? nameKeyOf(row.expertName) : nameKeyOf(row.agentName || row.expertName);
+  const qc = normName(row.qcAgent || '');
+  const form = kind === 'call' ? (row.formType || '') : (kind === 'ticket' ? 'ticket' : (kind === 'social' ? 'social' : ''));
+  let identity = '';
+  if (kind === 'call') identity = String(row.leadPhone || '');
+  else if (kind === 'ticket') identity = String(row.ticketCode || '');
+  else identity = String(row.messenger || '') + '|' + String(row.ticketCode || row.messageId || '');
+  /* محتوای کامل ریت (به‌جز متاتای بامِ一行ی): ریت‌های مستقلِ هم‌تاریخ/هم‌هویت (محتوای
+   * متفاوت) با هم تلفیق نمی‌شوند؛ ریت تکراریِ هفته‌ی Different (محتوای یک‌سان) یک‌بار نگه می‌شود. */
+  return JSON.stringify([kind, form, date, agent, qc, identity, ritContent(row)]);
+}
+
+/* فیلتها‌ی متاتای که در هویتِ ریت محاسبه نمی‌شوند (فایل مبدأ/ردیف/شناسه بامی). */
+const RIT_META_IGNORE = new Set(['sourceFile', 'sourceRow', 'id', 'evaluationId', 'datasetId',
+  'importedAt', 'createdAt', 'updatedAt', 'team', 'sourceAgentName', 'sourceExpertName']);
+function ritContent(row) {
+  if (!row || typeof row !== 'object') return '';
+  const parts = [];
+  Object.keys(row).sort().forEach((k) => {
+    if (RIT_META_IGNORE.has(k)) return;
+    let v = row[k];
+    if (v && typeof v === 'object') {
+      if (Array.isArray(v)) v = v.map(String).join(',');
+      else v = '{' + Object.keys(v).sort().map((x) => x + '=' + String(v[x])).join(';') + '}';
+    }
+    parts.push(k + '=' + String(v == null ? '' : v));
+  });
+  return parts.join('|');
+}
+
 /* ---------- تشخیص نوع فایل اکسل از روی نام ---------- */
 function formTypeOfFileName(name) {
   const n = String(name || '').toLowerCase();
@@ -875,7 +913,7 @@ return {
   findRedlineReason, findQcComment,
   isSituationalFile, isPivotFile, parsePivotRows, classifyCallFile, situationalRowKey, dateRangeOfCalls,
   classifyMonthlyScoreFile, parseMonthlyScoreRows, monthlyScoreRowKey,
-  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey, normalizeCount,
+  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey, ritKey, normalizeCount,
   criteriaFor, criteriaLabelsFor, labelOf, definitionsFor, defaults,
   situationalDefaults, situationalDefinitionsFor, situationalLabelOf,
   resolver, validateConfig, saveTeamConfig, hasConfiguration,

@@ -55,6 +55,62 @@
     return Fiscal.monthById(Fiscal.normalizeMonths(db.fiscalMonths), text(id));
   }
 
+  /* ماه مالی‌ای که بازه‌ی [from, to] بیشتر در آن قرار دارد (برای برچسب گزارش). */
+  function fiscalLabelForRange(db, from, to) {
+    const months = Fiscal.normalizeMonths(db && db.fiscalMonths);
+    if (!months.length) return '';
+    const f = text(from), t = text(to);
+    let best = null, bestOverlap = 0;
+    months.forEach((m) => {
+      const overlap = overlapDays(m.from, m.to, f, t);
+      if (overlap > bestOverlap) { bestOverlap = overlap; best = m; }
+    });
+    return best ? best.name : '';
+  }
+
+  /* تعداد روزهای هم‌پوشانی دو بازه‌ی تاریخ (yyyy/mm/dd). */
+  function overlapDays(aFrom, aTo, bFrom, bTo) {
+    const a1 = C.parseDate(text(aFrom)), a2 = C.parseDate(text(aTo));
+    const b1 = C.parseDate(text(bFrom)), b2 = C.parseDate(text(bTo));
+    if (!a1 || !a2 || !b1 || !b2) return 0;
+    const start = C.jalaliCmp(a1, b1) >= 0 ? a1 : b1;
+    const end = C.jalaliCmp(a2, b2) <= 0 ? a2 : b2;
+    if (C.jalaliCmp(end, start) < 0) return 0;
+    return dayDiff(start, end) + 1;
+  }
+
+  /* تفاضل روزهای دو تاریخ جلالی (end - start). */
+  function dayDiff(start, end) {
+    let s = { jy: start.jy, jm: start.jm, jd: start.jd };
+    let e = { jy: end.jy, jm: end.jm, jd: end.jd };
+    let days = 0;
+    while (C.jalaliCmp(s, e) < 0) {
+      s = C.jalaliNextDay ? C.jalaliNextDay(s) : jalaliNextDay(s);
+      days++;
+    }
+    return days;
+  }
+
+  function jalaliNextDay(d) {
+    const jd = d.jd + 1;
+    const monthDays = jalaliDaysInMonth(d.jy, d.jm);
+    if (jd > monthDays) {
+      let jm = d.jm + 1, jy = d.jy;
+      if (jm > 12) { jm = 1; jy += 1; }
+      return { jy: jy, jm: jm, jd: 1 };
+    }
+    return { jy: d.jy, jm: d.jm, jd: jd };
+  }
+
+  function jalaliDaysInMonth(jy, jm) {
+    /* سال کبیسه جلالی: سال‌های (jy-474) % 33 ∈ {5,9,13,17,22,26,30}. */
+    const r = (jy - 474) % 33;
+    const leap = r === 5 || r === 9 || r === 13 || r === 17 || r === 22 || r === 26 || r === 30;
+    if (jm <= 6) return 31;
+    if (jm <= 11) return leap ? 30 : 31;
+    return leap ? 30 : 29;
+  }
+
   /* ----------------------------------------------------------- منابع ریت */
   /* همه‌ی ردیف‌های دارای کارشناس کیوسی را به شکلی یکسان نماینده‌سازی می‌کند. */
   function ritRows(db) {
@@ -328,6 +384,7 @@
   return {
     ensureFiscalMonths: ensureFiscalMonths,
     monthById: monthById,
+    fiscalLabelForRange: fiscalLabelForRange,
     ritRows: ritRows,
     stats: stats,
     files: files,

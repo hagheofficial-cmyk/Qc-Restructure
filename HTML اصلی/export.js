@@ -172,6 +172,29 @@ window.QCExport = {
     XLSX.utils.book_append_sheet(wb, ws, 'Combined');
     download(wb, `QC_Combined_Report_${stamp()}.xlsx`);
   },
+  team(rows, label) {
+    const wb = XLSX.utils.book_new();
+    const hasSit = (rows || []).some((r) => r.situationalAvg !== '' && r.situationalAvg != null);
+    const h = ['تیم', 'نمره کل وزن‌دار', 'تیکت (ت)', 'میانگین نمره تیکت', 'ردلاین صفر تیکت',
+      'سوشال (ت)', 'میانگین نمره سوشال', 'SLA سوشال', 'عدم پاسخ سوشال',
+      'تماس (ت)', 'میانگین نمره تماس']
+      .concat(hasSit ? ['نمره موقعیتی'] : [])
+      .concat(['ردلاین تماس', 'مجموع ریت', 'وزن فعال (٪)', 'کارشناسان ارزیابی‌شده']);
+    const aoa = [h, ...rows.map((r) => [
+      r.name,
+      r.avgScore === '' ? '' : r.avgScore,
+      r.ticketCount, r.ticketAvg === '' ? '' : r.ticketAvg, r.ticketRedline,
+      r.socialCount, r.socialAvg === '' ? '' : r.socialAvg, r.socialSlaReal === '' ? '' : r.socialSlaReal, r.socialUnanswered,
+      r.callCount, r.callAvg === '' ? '' : r.callAvg,
+      r.situationalAvg === '' || r.situationalAvg == null ? '' : r.situationalAvg,
+      r.callRedline, r.totalCount, r.activeWeight || '', r.agentsEvaluated || ''
+    ])];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = h.map((x) => ({ wch: Math.max(14, String(x).length * 1.3) }));
+    XLSX.utils.book_append_sheet(wb, ws, 'Team Report');
+    const safe = String(label || 'گزارش تیمی').replace(/[\s/:*?"<>|]/g, '_');
+    download(wb, `${safe}_${stamp()}.xlsx`);
+  },
   sheets(title, sheets) {
     const wb = XLSX.utils.book_new();
     (sheets || []).forEach(({ name, rows }) => {

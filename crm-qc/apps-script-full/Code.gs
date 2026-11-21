@@ -1062,6 +1062,44 @@ function callRowKey(row) {
   return identity ? JSON.stringify([row.sourceFile, row.formType, identity, cleanQcDate(row.reviewDate) || String(row.reviewDate || ''), nameKeyOf(row.expertName), String(row.leadPhone || ''), cleanQcDate(row.callDate) || String(row.callDate || '')]) : null;
 }
 
+/* ریتِ یک فرم: هویت ریتِ مستقل از فایل مبدأ — بر اساس **تاریخ بررسی** (مهمی‌ترین
+ * بخش) + کارشناس + کارشناس کیوسی + فرم + هویت پیشنهادی (شماره شریک برای تماس،
+ * کد تیکت برای تیکت). همین ریت اگر همزمان در فایل این هفته و هفته بعدی باشد
+ * یک‌بار محاسبه می‌شود. */
+function ritKey(row, kind) {
+  kind = kind || 'call';
+  const date = cleanQcDate(row.reviewDate) || String(row.reviewDate || '');
+  if (!date) return null;
+  const agent = kind === 'call' ? nameKeyOf(row.expertName) : nameKeyOf(row.agentName || row.expertName);
+  const qc = normName(row.qcAgent || '');
+  const form = kind === 'call' ? (row.formType || '') : (kind === 'ticket' ? 'ticket' : (kind === 'social' ? 'social' : ''));
+  let identity = '';
+  if (kind === 'call') identity = String(row.leadPhone || '');
+  else if (kind === 'ticket') identity = String(row.ticketCode || '');
+  else identity = String(row.messenger || '') + '|' + String(row.ticketCode || row.messageId || '');
+  /* محتوای کامل ریت (به‌جز متاتای بامِ一行ی): ریت‌های مستقلِ هم‌تاریخ/هم‌هویت (محتوای
+   * متفاوت) با هم تلفیق نمی‌شوند؛ ریت تکراریِ هفته‌ی Different (محتوای یک‌سان) یک‌بار نگه می‌شود. */
+  return JSON.stringify([kind, form, date, agent, qc, identity, ritContent(row)]);
+}
+
+/* فیلتها‌ی متاتای که در هویتِ ریت محاسبه نمی‌شوند (فایل مبدأ/ردیف/شناسه بامی). */
+const RIT_META_IGNORE = new Set(['sourceFile', 'sourceRow', 'id', 'evaluationId', 'datasetId',
+  'importedAt', 'createdAt', 'updatedAt', 'team', 'sourceAgentName', 'sourceExpertName']);
+function ritContent(row) {
+  if (!row || typeof row !== 'object') return '';
+  const parts = [];
+  Object.keys(row).sort().forEach((k) => {
+    if (RIT_META_IGNORE.has(k)) return;
+    let v = row[k];
+    if (v && typeof v === 'object') {
+      if (Array.isArray(v)) v = v.map(String).join(',');
+      else v = '{' + Object.keys(v).sort().map((x) => x + '=' + String(v[x])).join(';') + '}';
+    }
+    parts.push(k + '=' + String(v == null ? '' : v));
+  });
+  return parts.join('|');
+}
+
 /* ---------- تشخیص نوع فایل اکسل از روی نام ---------- */
 function formTypeOfFileName(name) {
   const n = String(name || '').toLowerCase();
@@ -1301,7 +1339,7 @@ return {
   findRedlineReason, findQcComment,
   isSituationalFile, isPivotFile, parsePivotRows, classifyCallFile, situationalRowKey, dateRangeOfCalls,
   classifyMonthlyScoreFile, parseMonthlyScoreRows, monthlyScoreRowKey,
-  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey, normalizeCount,
+  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey, ritKey, normalizeCount,
   criteriaFor, criteriaLabelsFor, labelOf, definitionsFor, defaults,
   situationalDefaults, situationalDefinitionsFor, situationalLabelOf,
   resolver, validateConfig, saveTeamConfig, hasConfiguration,
@@ -1881,6 +1919,64 @@ return {
 
   function portfolioAgents(data, q) { return combinedAgentReport(data, Object.assign({}, q, { includeEmpty: true })); }
 
+  /* ---------------------------- گزارش تجمیعی تیمی ----------------------------
+   * یک سطر برای هر تیم: نمره کل وزن‌دار + تعداد و میانگین نمره ریت‌های
+   * تیکت/سوشال/تماس/موقعیتی بر اساس کل ریت‌های تیم (نه میانگین میانگین‌ها). */
+  function combinedTeamReport(data, q) {
+    q = q || {};
+    var map = Object.create(null);
+    var teamSet = valueSet(q.team), agentSet = valueSet(q.agent);
+    var teamKeySet = teamSet ? new Set(Array.from(teamSet).map(P.teamKey)) : null;
+    function ensure(team) {
+      var name = team || 'بدون تیم';
+      if (!map[name]) map[name] = { name: name, tickets: [], socials: [], calls: [], situational: [], monthlyTickets: [], monthlySocials: [], agents: new Set() };
+      return map[name];
+    }
+    if (q.includeEmpty) (data.agents || []).forEach(function (a) {
+      if ((!teamKeySet || teamKeySet.has(P.teamKey(a.team))) && (!agentSet || agentSet.has(a.name))) ensure(a.team || 'بدون تیم');
+    });
+    filterRows(data.tickets, q, data).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.tickets.push(r); m.agents.add(r.agentName); });
+    filterRows(data.socials, q, data).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.socials.push(r); m.agents.add(r.agentName); });
+    filterCalls(data, q).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.calls.push(r); m.agents.add(r.expertName); });
+    filterSituational(data, q).forEach(function (r) { var m = ensure(rowTeam(data, r)); m.situational.push(r); m.agents.add(r.expertName); });
+    filterMonthlyScores(data, q, 'ticket').forEach(function (r) { var m = ensure(rowTeam(data, r)); m.monthlyTickets.push(r); m.agents.add(r.expertName); });
+    filterMonthlyScores(data, q, 'social').forEach(function (r) { var m = ensure(rowTeam(data, r)); m.monthlySocials.push(r); m.agents.add(r.expertName); });
+
+    var weightsCfg = data && data.settings && data.settings.scoreWeights;
+    return Object.keys(map).map(function (key) {
+      var m = map[key], T = m.tickets, S = m.socials, Ph = m.calls, Sit = m.situational;
+      var effT = effectiveChannelScore(T, m.monthlyTickets);
+      var effS = effectiveChannelScore(S, m.monthlySocials);
+      var callAvgVal = avgScore(Ph);
+      var sitAvgVal = situationalAvgOf(Sit);
+      var weighted = computeWeightedScore({
+        callAvg: callAvgVal,
+        situationalAvg: sitAvgVal,
+        socialAvg: effS.avg,
+        ticketAvg: effT.avg
+      }, weightsCfg);
+      return {
+        name: m.name,
+        ticketCount: effT.count, ticketAvg: effT.avg, ticketSource: effT.source, ticketRedline: redlineCount(T, 'ticket'),
+        socialCount: effS.count, socialAvg: effS.avg, socialSource: effS.source, socialRedline: redlineCount(S, 'social'), socialSlaReal: rateSla(S),
+        socialUnanswered: S.filter(function (x) { return x.responseStatus === 'عدم پاسخ'; }).length,
+        callCount: Ph.length, callAvg: callAvgVal, callRedline: redlineCount(Ph, 'call'),
+        situationalCount: Sit.length,
+        situationalForms: Sit.reduce(function (s, r) { return s + (Number(r.formsCount) || 0); }, 0),
+        situationalAvg: sitAvgVal,
+        totalCount: effT.count + effS.count + Ph.length,
+        scoredCount: effT.scoredCount + effS.scoredCount + scoredRows(Ph).length,
+        agentsEvaluated: m.agents.size,
+        avgScore: weighted.score,
+        weightedScore: weighted.score,
+        activeWeight: weighted.activeWeight,
+        rawWeightedSum: weighted.rawWeightedSum,
+        weightedBreakdown: weighted
+      };
+    }).filter(function (x) { return q.includeEmpty || x.totalCount > 0 || x.situationalCount > 0; })
+      .sort(function (a, b) { return (b.avgScore === '' ? -1 : b.avgScore) - (a.avgScore === '' ? -1 : a.avgScore) || a.name.localeCompare(b.name, 'fa'); });
+  }
+
   /* ----------------------------------------------------- پرونده کارشناس */
   /** کارشناس با نام یا داخلی (ext) → جزئیات کامل */
   /* ---------------------------- گزارش تماس (ردیفی) + نمرهی اقلام کلی ---------------------------- */
@@ -2408,7 +2504,7 @@ return {
     situationalAvgOf: situationalAvgOf, aggregateSituational: aggregateSituational,
     scoredRows: scoredRows,
     avgScore: avgScore, hasRedline: hasRedline, redlineDetails: redlineDetails, criteriaKeys: criteriaKeys, criterionStats: criterionStats, dataStatus: dataStatus, portfolioAgents: portfolioAgents,
-    monthlyBreakdown: monthlyBreakdown, combinedAgentReport: combinedAgentReport, agentByIdent: agentByIdent, agentProfile: agentProfile,
+    monthlyBreakdown: monthlyBreakdown, combinedAgentReport: combinedAgentReport, combinedTeamReport: combinedTeamReport, agentByIdent: agentByIdent, agentProfile: agentProfile,
     ticketReport: ticketReport, socialReport: socialReport, callReport: callReport, elementRates: elementRates, dashboard: dashboard,
     callAnalysis: callAnalysis,
     configuredCriteria: configuredCriteria, criterionLabel: criterionLabel
@@ -2554,6 +2650,11 @@ function semantic(row, kind) {
 }
 function strongKey(row, kind, namespace) {
   if (kind === 'situational') return P.situationalRowKey ? P.situationalRowKey(row) : null;
+  if (kind === 'pivot') {
+    // پيورگ: هر سلول (کارشناس فروش × کارشناس کیوسی × ماه) یک ریت واحد است
+    return row.expertName && row.qcAgent && row.periodFrom
+      ? 'pivot:' + P.nameKey(row.expertName) + '|' + P.normName(row.qcAgent) + '|' + row.periodFrom : null;
+  }
   if (row.evaluationId) return kind + ':evaluation:' + (row.formType || '') + ':' + String(row.evaluationId) + ':' + (row.datasetId || namespace || '');
   if (kind === 'call' && row.sourceRow != null && row.sourceFile) return P.callRowKey(row);
   if (namespace && row.id != null) return kind + ':id:' + namespace + ':' + row.id;
@@ -2959,11 +3060,20 @@ function callFiles(db, files, options) {
     };
   }
 
+  /* دتپلیکت بر اساس **تاریخ بررسی** + هویت + محتوای ریت — ریت‌های تکراری که در
+   * فایل‌های هفته‌ی مختلف (مبدأِ متفاوت) تکرار می‌شوند، یک‌بار نگه می‌شود. دو ریتِ
+   * مستقلِ یک‌محتوا از یک فایلِ مبدأ هر دو نگه می‌شوند (محتوای متفاوت هم وهویتِ متفاوت
+   * در کلید است). */
   const seen = new Map(); const out = [];
   for (const r of db.callFeedbacks) {
-    const key = P.callRowKey(r);
-    if (key && seen.has(key)) continue;
-    if (key) seen.set(key, 1);
+    const key = P.ritKey(r, 'call') || P.callRowKey(r);
+    const file = String(r.sourceFile || '');
+    if (key && seen.has(key)) {
+      /* فقط اگر از فایلی غیر از مبدأِ قبلی است، تکرارِ هفتگی است */
+      const firstFile = seen.get(key);
+      if (firstFile && file && firstFile !== file) continue;
+    }
+    if (key && !seen.has(key)) seen.set(key, file || '');
     out.push(r);
   }
   db.callFeedbacks = out;
@@ -4721,6 +4831,62 @@ return {
     return Fiscal.monthById(Fiscal.normalizeMonths(db.fiscalMonths), text(id));
   }
 
+  /* ماه مالی‌ای که بازه‌ی [from, to] بیشتر در آن قرار دارد (برای برچسب گزارش). */
+  function fiscalLabelForRange(db, from, to) {
+    const months = Fiscal.normalizeMonths(db && db.fiscalMonths);
+    if (!months.length) return '';
+    const f = text(from), t = text(to);
+    let best = null, bestOverlap = 0;
+    months.forEach((m) => {
+      const overlap = overlapDays(m.from, m.to, f, t);
+      if (overlap > bestOverlap) { bestOverlap = overlap; best = m; }
+    });
+    return best ? best.name : '';
+  }
+
+  /* تعداد روزهای هم‌پوشانی دو بازه‌ی تاریخ (yyyy/mm/dd). */
+  function overlapDays(aFrom, aTo, bFrom, bTo) {
+    const a1 = C.parseDate(text(aFrom)), a2 = C.parseDate(text(aTo));
+    const b1 = C.parseDate(text(bFrom)), b2 = C.parseDate(text(bTo));
+    if (!a1 || !a2 || !b1 || !b2) return 0;
+    const start = C.jalaliCmp(a1, b1) >= 0 ? a1 : b1;
+    const end = C.jalaliCmp(a2, b2) <= 0 ? a2 : b2;
+    if (C.jalaliCmp(end, start) < 0) return 0;
+    return dayDiff(start, end) + 1;
+  }
+
+  /* تفاضل روزهای دو تاریخ جلالی (end - start). */
+  function dayDiff(start, end) {
+    let s = { jy: start.jy, jm: start.jm, jd: start.jd };
+    let e = { jy: end.jy, jm: end.jm, jd: end.jd };
+    let days = 0;
+    while (C.jalaliCmp(s, e) < 0) {
+      s = C.jalaliNextDay ? C.jalaliNextDay(s) : jalaliNextDay(s);
+      days++;
+    }
+    return days;
+  }
+
+  function jalaliNextDay(d) {
+    const jd = d.jd + 1;
+    const monthDays = jalaliDaysInMonth(d.jy, d.jm);
+    if (jd > monthDays) {
+      let jm = d.jm + 1, jy = d.jy;
+      if (jm > 12) { jm = 1; jy += 1; }
+      return { jy: jy, jm: jm, jd: 1 };
+    }
+    return { jy: d.jy, jm: d.jm, jd: jd };
+  }
+
+  function jalaliDaysInMonth(jy, jm) {
+    /* سال کبیسه جلالی: سال‌های (jy-474) % 33 ∈ {5,9,13,17,22,26,30}. */
+    const r = (jy - 474) % 33;
+    const leap = r === 5 || r === 9 || r === 13 || r === 17 || r === 22 || r === 26 || r === 30;
+    if (jm <= 6) return 31;
+    if (jm <= 11) return leap ? 30 : 31;
+    return leap ? 30 : 29;
+  }
+
   /* ----------------------------------------------------------- منابع ریت */
   /* همه‌ی ردیف‌های دارای کارشناس کیوسی را به شکلی یکسان نماینده‌سازی می‌کند. */
   function ritRows(db) {
@@ -4994,6 +5160,7 @@ return {
   return {
     ensureFiscalMonths: ensureFiscalMonths,
     monthById: monthById,
+    fiscalLabelForRange: fiscalLabelForRange,
     ritRows: ritRows,
     stats: stats,
     files: files,
@@ -5258,7 +5425,10 @@ function dispatch(method, url, body) {
     const type = q.type || 'social';
     const level = q.level === 'team' ? 'team' : 'agent';
     const elements = R.elementRates ? R.elementRates(db, q) : undefined;
-    if (type === 'combined') return { type, level, rows: R.combinedAgentReport(db, q), elements };
+    if (type === 'combined') {
+      const rows = level === 'team' ? (R.combinedTeamReport ? R.combinedTeamReport(db, q) : R.combinedAgentReport(db, q)) : R.combinedAgentReport(db, q);
+      return { type, level, rows, elements };
+    }
     if (type === 'call' && R.callReport) {
       const crit = window.QCParse ? window.QCParse.resolver(db.settings.callCriteria) : {};
       const rep = R.callReport(db, level, q, crit);

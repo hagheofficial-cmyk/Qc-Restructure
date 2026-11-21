@@ -41,13 +41,21 @@ function mergeCallRows(db, rows) {
 }
 
 function dedupeCallRows(db) {
-  // ردیف‌های تکراری دقیقاً با همان sourceFile را یک‌بار بیشتر نگه نمی‌داریم
+  // ردیف‌های تکراری بر اساس **تاریخ بررسی** + هویت + محتوای کامل ریت (ریتِ یک‌تای مستقل از
+  // فایل مبدأ): اگر یک ریت همزمان در فایل این هفته و هفته بعدی باشد، یک‌بار نگه می‌شود.
+  // دو ریتِ مستقلِ یک‌محتوا از یک فایلِ مبدأ هر دو نگه می‌شوند.
   const seen = new Map();
   const out = [];
   for (const r of (db.callFeedbacks || [])) {
-    const key = P.callRowKey(r);
+    const key = P.ritKey(r, 'call') || P.callRowKey(r);
     if (!key) { out.push(r); continue; }
-    if (!seen.has(key)) { seen.set(key, 1); out.push(r); }
+    const file = String(r.sourceFile || '');
+    if (seen.has(key)) {
+      const firstFile = seen.get(key);
+      /* فقط تکرارِ هفتگی (مبدأِ متفاوت) حذف می‌شود */
+      if (firstFile && file && firstFile !== file) continue;
+    } else { seen.set(key, file || ''); }
+    out.push(r);
   }
   db.callFeedbacks = out;
 }

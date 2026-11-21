@@ -30,6 +30,8 @@ async function render(root, arg) {
 
     <div class="card" id="pAll" style="margin-bottom:16px"><div class="loading-page"><div class="spinner"></div><p>در حال بارگذاری فهرست کارشناسان…</p></div></div>
 
+    <div class="card" id="pTeamCard" style="margin-bottom:16px"><div class="loading-page"><div class="spinner"></div><p>در حال بارگذاری گزارش تیمی…</p></div></div>
+
 `;
 
   const agents = await api.get('/api/agents');
@@ -111,9 +113,77 @@ async function render(root, arg) {
     if(profileModal && profileModal.isConnected) profileModal.close();
     profileModal=null;profileBody=null;historyCalls=[];App.clearCharts();
   }
+
+  /* ------------------------- گزارش تیمی (نمره + تعداد ریت هر تیم در هفته) ------------------------- */
+  let teamReportId = 0;
+  async function renderTeamReport() {
+    const wrap = $('#pTeamCard', root);
+    if (!wrap) return;
+    const request = ++teamReportId;
+    wrap.innerHTML = `<div class="loading-page"><div class="spinner"></div><p>در حال بارگذاری گزارش تیمی…</p></div>`;
+    try {
+      const q = new URLSearchParams({ type: 'combined', level: 'team' });
+      if (App.dateRange.from) q.set('from', App.dateRange.from);
+      if (App.dateRange.to) q.set('to', App.dateRange.to);
+      const selected = msTeams.getValues();
+      if (selected.length) q.set('team', selected.join(','));
+      const d = await api.get('/api/reports?' + q.toString());
+      if (request !== teamReportId || !wrap.isConnected) return;
+      const rows = (d.rows || []).slice().sort((a, b) => (b.avgScore === '' ? -1 : b.avgScore) - (a.avgScore === '' ? -1 : a.avgScore) || a.name.localeCompare(b.name, 'fa'));
+      const fiscal = (window.QCRitStats && window.QCRitStats.fiscalLabelForRange) ? window.QCRitStats.fiscalLabelForRange({ fiscalMonths: (App.fiscalMonths || []) }, App.dateRange.from, App.dateRange.to) : '';
+      const weekLabel = App.dateRangeLabel ? App.dateRangeLabel() : ((App.dateRange.from || App.dateRange.to) ? ('از ' + fa(App.dateRange.from || 'ابتدا') + ' تا ' + fa(App.dateRange.to || 'انتها')) : 'همه دوره‌ها');
+      const stampLabel = 'هفته ' + weekLabel + (fiscal ? ' · ماه مالی ' + esc(fiscal) : '');
+      if (!rows.length) {
+        wrap.innerHTML = `<div class="card-head teal"><div class="head-icon"><i class="fa-solid fa-users"></i></div>
+          <div><h3>گزارش تیمی — هفته انتخاب‌شده</h3><div class="sub">${esc(stampLabel)}</div></div></div>
+          ${emptyState('fa-users', 'داده‌ی تیم‌ی در این هفته نیست', 'بازه را گسترده‌تر کنید یا فیلتر تیم را تغییر دهید.')}`;
+        return;
+      }
+      const hasSit = rows.some((r) => r.situationalAvg !== '' && r.situationalAvg != null);
+      const scoreCell = (v) => v === '' || v == null ? '<span style="color:var(--muted)">—</span>' : scorePill(v);
+      const cntCell = (v) => v === 0 ? '<span style="color:var(--muted)">۰</span>' : `<b>${fa(v)}</b>`;
+      wrap.innerHTML = `
+        <div class="card-head teal"><div class="head-icon"><i class="fa-solid fa-users"></i></div>
+          <div><h3>گزارش تیمی — هفته انتخاب‌شده</h3><div class="sub">${esc(stampLabel)} · ${fa(rows.length)} تیم</div></div>
+          <div class="spacer"></div>
+          <button class="btn success-soft no-print" id="pTeamXls" type="button"><i class="fa-solid fa-file-excel"></i> دانلود جدول گزارش تیمی</button>
+        </div>
+        <div class="table-wrap">
+          <table class="tbl">
+            <thead><tr>
+              <th>تیم</th><th>نمره کل وزن‌دار</th>
+              <th>تیکت (ت)</th><th>میانگین نمره تیکت</th>
+              <th>سوشال (ت)</th><th>میانگین نمره سوشال</th>
+              <th>تماس (ت)</th><th>میانگین نمره تماس</th>
+              ${hasSit ? '<th>نمره موقعیتی</th>' : ''}
+              <th>مجموع ریت</th><th>کارشناسان ارزیابی‌شده</th>
+            </tr></thead>
+            <tbody>${rows.map((r) => `<tr>
+              <td><span class="tag-team">${esc(QCParse.displayTeam(r.name))}</span></td>
+              <td>${scoreCell(r.avgScore)}</td>
+              <td>${cntCell(r.ticketCount)}</td><td>${scoreCell(r.ticketAvg)}</td>
+              <td>${cntCell(r.socialCount)}</td><td>${scoreCell(r.socialAvg)}</td>
+              <td>${cntCell(r.callCount)}</td><td>${scoreCell(r.callAvg)}</td>
+              ${hasSit ? `<td>${scoreCell(r.situationalAvg)}</td>` : ''}
+              <td><b>${fa(r.totalCount)}</b></td>
+              <td>${fa(r.agentsEvaluated || 0)}</td>
+            </tr>`).join('')}</tbody>
+          </table>
+        </div>`;
+      const xlsBtn = $('#pTeamXls', wrap);
+      if (xlsBtn) xlsBtn.addEventListener('click', () => {
+        if (window.QCExport && window.QCExport.team) window.QCExport.team(rows, 'گزارش_تیمی_' + stampLabel.replace(/[\s/:*?"<>|]/g, '_'));
+        else toast.error('خروجی گزارش تیمی در این نسخه آماده نیست');
+      });
+    } catch (e) {
+      if (request !== teamReportId || !wrap.isConnected) return;
+      wrap.innerHTML = `<div class="card-pad">${emptyState('fa-triangle-exclamation', 'خطای بارگذاری گزارش تیمی', e.message)}</div>`;
+    }
+  }
+
   async function refresh() {
     const name = curAgent;
-    await Promise.all([renderMaster(), name ? load(name) : Promise.resolve()]);
+    await Promise.all([renderMaster(), renderTeamReport(), name ? load(name) : Promise.resolve()]);
   }
 
   /* ------------------------- جستجوی نام ------------------------- */
