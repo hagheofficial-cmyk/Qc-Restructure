@@ -71,6 +71,8 @@
     (db.callFeedbacks || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.reviewDate, r.formType, r.team, r.sourceFile, r.sourceRow, 1));
     (db.tickets || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'ticket', r.team, r.sourceFile || '', 0, 1));
     (db.socials || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'social', r.team, r.sourceFile || '', 0, 1));
+    /* پيورگ ریت: هر سلول = تعداد ریت یک کارشناس کیوسی برای یک کارشناس فروش */
+    (db.ritPivots || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.periodFrom, 'pivot', r.team, r.sourceFile, r.sourceRow, r.count || 1));
     /* ردیف‌های ماهانه (بدون کارشناس کیوسی) فقط در جمع تیم‌ها لحاظ می‌شوند */
     (db.monthlyScores || []).forEach((r) => push(r, r.expertName, '', r.periodFrom, r.channel, r.team, r.sourceFile, r.sourceRow, r.evalCount || 1));
     return out;
@@ -99,7 +101,7 @@
     const experts = new Map();
     const agents = new Map();
     const teams = new Map();
-    const totals = { all: 0, calls: 0, tickets: 0, socials: 0, withQc: 0 };
+    const totals = { all: 0, calls: 0, tickets: 0, socials: 0, pivot: 0, withQc: 0 };
 
     rows.forEach((r) => {
       totals.all += r.count;
@@ -107,6 +109,7 @@
       if (r.form === 'tele' || r.form === 'account' || r.form === 'mlm') totals.calls += r.count;
       else if (r.form === 'ticket') totals.tickets += r.count;
       else if (r.form === 'social') totals.socials += r.count;
+      else if (r.form === 'pivot') totals.pivot += r.count;
 
       if (r.team) teams.set(r.team, (teams.get(r.team) || 0) + r.count);
 
@@ -172,6 +175,7 @@
       let kind = 'form', type = r.form;
       if (r.form === 'ticket' || r.form === 'social') { kind = r.form === 'ticket' ? 'ticket' : 'social'; type = r.form; }
       else if (r.form === 'tele' || r.form === 'account' || r.form === 'mlm') { kind = 'form'; }
+      else if (r.form === 'pivot') { kind = 'pivot'; }
       else { kind = 'monthly'; }
       touch(ensure(r.file, kind, type), r);
     });
@@ -251,9 +255,16 @@
       const agentCol = findCol(headers, AGENT_COLS);
       const dateCol = findCol(headers, DATE_COLS);
       const teamCol = findCol(headers, TEAM_COLS);
+      /* فایل پيورگ: کارشناس کیوسی ستونِ داده است (نه سلول) — در صورت درخواست
+       * کارشناس کیوسی، فقط ردیف‌هایی که مقدار غیرنخوده برای آن ستون دارند برمی‌گردند. */
+      const pivotMode = !qcCol && !!agentCol && !!qcWant && headers.some((h) => norm(h) === qcWant);
+      const qcColIdx = pivotMode ? headers.findIndex((h) => norm(h) === qcWant) : (qcCol ? headers.indexOf(qcCol) : -1);
+      const qcKey = qcColIdx >= 0 ? headers[qcColIdx] : qcCol;
       (entry.rows || []).forEach((cells, i) => {
         total++;
-        if (qcWant && !(qcCol && norm(cells[qcCol]) === qcWant)) return;
+        if (qcWant && !pivotMode && !(qcCol && norm(cells[qcCol]) === qcWant)) return;
+        if (pivotMode && (P.normalizeCount(cells[qcKey]) <= 0
+          || /^مجموع$|^جمع|^میانگین|^total$|^average$/i.test(norm(agentCol ? cells[agentCol] : '')))) return;
         if (agentWant && !(agentCol && norm(cells[agentCol]) === agentWant)) return;
         if (allowed && agentCol && !allowed.some((a) => norm(cells[agentCol]) === a)) return;
         if (teamWant && !(teamCol && norm(cells[teamCol]) === norm(teamWant))) return;
@@ -262,7 +273,7 @@
           if (!inRange(d, from, to)) return;
         }
         if (out.length >= limit) return;
-        out.push({ row: (i + 1), file: name, cells: cells });
+        out.push({ row: (i + 1), file: name, cells: cells, pivot: pivotMode });
       });
     });
     const headers = out.length ? Object.keys(out[0].cells) : (entries[0] ? (entries[0][1].headers || []) : []);

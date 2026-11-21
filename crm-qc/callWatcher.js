@@ -207,6 +207,7 @@ function scanOnce(db, saveCallback, log) {
     // پاس ۱: فایل‌های ثابت (ریز نمرات) — استخراج بازه تاریخ برای اتصال خودکار به فایل موقعیتی
     const pendingSituational = [];
     const pendingMonthly = [];
+    const pendingPivot = [];
     const batchRanges = Object.create(null);
 
     for (const f of files) {
@@ -230,6 +231,10 @@ function scanOnce(db, saveCallback, log) {
           }
           if (fx.kind === 'monthly_score') {
             pendingMonthly.push({ f, sig, fx });
+            continue;
+          }
+          if (fx.kind === 'pivot') {
+            pendingPivot.push({ f, sig, fx });
             continue;
           }
           if (fx.rows) {
@@ -326,6 +331,33 @@ function scanOnce(db, saveCallback, log) {
       } catch (e) { console.warn('[calls] خطا در فایل نمره ماهانه', item.f, '→', e.message); }
     }
 
+    // پاس ۴: فایل‌های پيورگ ریت
+    for (const item of pendingPivot) {
+      try {
+        const fx = item.fx;
+        const parsed = P.parsePivotRows(fx.rawRows, { sourceFile: item.f });
+        if (parsed.length) {
+          const fallback = ImportData.pivotDateFromName(item.f);
+          const nowIso = new Date().toISOString();
+          parsed.forEach((r) => {
+            r.team = '';
+            r.periodFrom = fallback;
+            r.periodTo = fallback;
+            r.importedAt = nowIso;
+          });
+          const counts = ImportData.pivots(db, parsed, 'append', item.f);
+          if (fx.rawRows && fx.rawRows.length) {
+            db.ritRaw = db.ritRaw || {};
+            if (!db.ritRaw[item.f]) db.ritRaw[item.f] = { headers: Object.keys(fx.rawRows[0] || {}), rows: fx.rawRows.slice(0, 20000) };
+          }
+          changed = true;
+          delta.pivot = (delta.pivot || 0) + (counts.added || parsed.length);
+          newFiles[item.f] = item.sig;
+          log && log(base(item.f), parsed.length + ' سلول پيورگ');
+        }
+      } catch (e) { console.warn('[calls] خطا در فایل پيورگ', item.f, '→', e.message); }
+    }
+
     if (changed) {
       dedupeCallRows(db);
       db.callSync = db.callSync || {};
@@ -385,6 +417,7 @@ function dirStatus(db) {
   const fixedByFile = Object.create(null);
   const sitByFile = Object.create(null);
   const monthlyByFile = Object.create(null);
+  const pivotByFile = Object.create(null);
   const allDates = [];
 
   for (const r of (db.callFeedbacks || [])) {
@@ -422,12 +455,22 @@ function dirStatus(db) {
     if (r.periodTo && (!rec.to || r.periodTo > rec.to)) rec.to = r.periodTo;
     if (r.importedAt) { const t = Date.parse(r.importedAt); if (t && t > rec.mtime) rec.mtime = t; }
   }
+  for (const r of (db.ritPivots || [])) {
+    if (r.periodFrom) allDates.push(r.periodFrom);
+    if (!r.sourceFile) continue;
+    const rec = pivotByFile[r.sourceFile] || (pivotByFile[r.sourceFile] = { rows: 0, from: '', to: '', mtime: 0 });
+    rec.rows += (r.count || 1);
+    if (r.periodFrom && (!rec.from || r.periodFrom < rec.from)) rec.from = r.periodFrom;
+    if (r.periodTo && (!rec.to || r.periodTo > rec.to)) rec.to = r.periodTo;
+    if (r.importedAt) { const t = Date.parse(r.importedAt); if (t && t > rec.mtime) rec.mtime = t; }
+  }
 
   const allNames = new Set([
     ...diskFiles,
     ...Object.keys(fixedByFile),
     ...Object.keys(sitByFile),
-    ...Object.keys(monthlyByFile)
+    ...Object.keys(monthlyByFile),
+    ...Object.keys(pivotByFile)
   ]);
 
   const out = Array.from(allNames).map((f) => {
@@ -443,6 +486,7 @@ function dirStatus(db) {
     const fx = fixedByFile[f] || null;
     const sx = sitByFile[f] || null;
     const mx = monthlyByFile[f] || null;
+    const px = pivotByFile[f] || null;
     const lower = f.toLowerCase();
 
     let kind = 'other', type = null, detected = 'unknown', rows = 0, periodFrom = '', periodTo = '', pairedFixedFile = '';
@@ -461,6 +505,11 @@ function dirStatus(db) {
       detected = type || '(تشخیص از محتوا)';
       rows = sx ? sx.rows : 0;
       if (sx) { periodFrom = sx.from; periodTo = sx.to; pairedFixedFile = sx.pairedFixedFile; if (!mtime && sx.mtime) mtime = sx.mtime; }
+    } else if (px) {
+      kind = 'pivot';
+      detected = 'پيورگ ریت';
+      rows = px ? px.rows : 0;
+      if (px) { periodFrom = px.from; periodTo = px.to; if (!mtime && px.mtime) mtime = px.mtime; }
     } else if (fx || (onDisk && /\.(xlsx|xls|csv)$/.test(lower))) {
       kind = 'form';
       const forms = fx ? Array.from(fx.forms) : [];

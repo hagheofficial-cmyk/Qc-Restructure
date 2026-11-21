@@ -192,3 +192,55 @@ test('آمار ریت: آپلود اکسل ردیف‌های خام را ذخی�
   I.deleteSourceFile(db, 'rit-test-tele.xlsx', 'form');
   assert.equal(db.ritRaw['rit-test-tele.xlsx'], undefined);
 });
+
+/* ------------------------------------------------------------- فایل پيورگ ریت */
+test('آمار ریت: فایل پيورگ (ستون‌های کارشناس کیوسی + مقادیر عددی) شناسایی و هر سلول به‌عنوان ریت ثبت می‌شود', () => {
+  /* ساخت مدل یک فایل پيورگ: ردیف‌ها کارشناسان فروش، ستون‌ها کارشناسان کیوسی */
+  const pivotRows = [
+    { expert_name: 'Total', Hadi_Aghaee: 36, Sheyda_Faraz: 57, Arash_Hadipour: 154 },
+    { expert_name: 'الف خمسه', internal_code: '3140', Hadi_Aghaee: 2, Sheyda_Faraz: 3, Arash_Hadipour: 5 },
+    { expert_name: 'ب عباسی', internal_code: '3136', Hadi_Aghaee: 0, Sheyda_Faraz: 4, Arash_Hadipour: 1 }
+  ];
+  assert.equal(P.isPivotFile(pivotRows), true, 'پيورگ شناسایی می‌شود');
+  /* فایلی با ستون نمره پيورگ نیست */
+  assert.equal(P.isPivotFile([{ expert_name: 'الف', score: 90, qc_expert_name: 'کیوسی' }]), false);
+  /* کلاسیفیکاسیون: kind = pivot، formType null */
+  const cls = P.classifyCallFile('qc_army_pivote_2026-11-21T17_24_56.xlsx', pivotRows);
+  assert.equal(cls.kind, 'pivot');
+  assert.equal(cls.formType, null);
+
+  const db = fixture();
+  const res = I.callFiles(db, [{ name: 'qc_army_pivote_2026-11-21T17_24_56.xlsx', rows: pivotRows }], { mode: 'append' });
+  assert.equal(res.ok, true);
+  const out = res.results[0];
+  assert.equal(out.ok, true);
+  assert.equal(out.kind, 'pivot');
+  assert.equal(out.count, 5, 'دو ردیف غیرترکیبی × ستون‌های دارای مقدار = ۵ سلول');
+
+  /* هر سلول با تعداد خود در آمار ریت محاسبه می‌شود.
+   * تاریخ fallback از نام فایل (2026-11-21 = 1405/08/30) → ماه مالی آذر (1405/08/20→1405/09/19) */
+  Rit.ensureFiscalMonths(db, '1405/11/21');
+  const stats = Rit.stats(db, { from: '1405/08/20', to: '1405/09/19' });
+  const ex = stats.experts.find((q) => q.qc === 'Hadi_Aghaee');
+  assert.ok(ex, 'Hadi_Aghaee در لیست کارشناسان کیوسی است');
+  assert.equal(ex.total, 2, '۲ ریت برای Hadi_Aghaee (الف خمسه ۲ + ب عباسی ۰)');
+  const agent = ex.byAgent.find((a) => a.agent === 'الف خمسه');
+  assert.equal(agent.total, 2);
+  const sx = stats.experts.find((q) => q.qc === 'Sheyda_Faraz');
+  assert.equal(sx.total, 7, '۳ + ۴ = ۷');
+  assert.equal(stats.totals.pivot, 15, 'جمع مقادیر سلول‌ها (۲+۳+۵+۴+۱) در شمارش پيورگ');
+
+  /* ردیف خام ذخیره می‌شود و drill-down کارشناس کیوسی بر اساس ستون doing می‌شود */
+  assert.ok(db.ritRaw['qc_army_pivote_2026-11-21T17_24_56.xlsx']);
+  const raw = Rit.rawRows(db, { file: 'qc_army_pivote_2026-11-21T17_24_56.xlsx', qc: 'Sheyda_Faraz' });
+  assert.equal(raw.total, 3, 'سه ردیف خام بررسی می‌شود (ردیف مجموع هم افزوده می‌شود)');
+  assert.equal(raw.rows.length, 2, 'دو ردیف کارشناس فروش برای Sheyda_Faraz');
+  assert.equal(raw.rows[0].pivot, true, 'نشان‌دهنده‌ی پيورگ برای UI');
+
+  /* حذف فایل پيورگ، ریت‌های آن و ردیف‌های خام را پاک می‌کند */
+  const del = I.deleteSourceFile(db, 'qc_army_pivote_2026-11-21T17_24_56.xlsx', 'pivot');
+  assert.equal(del.ok, true);
+  assert.equal(del.removedPivots, 5);
+  assert.equal((db.ritPivots || []).length, 0);
+  assert.equal(db.ritRaw['qc_army_pivote_2026-11-21T17_24_56.xlsx'], undefined);
+});

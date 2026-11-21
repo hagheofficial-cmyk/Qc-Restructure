@@ -272,6 +272,17 @@ function situational(db, incoming, mode, sourceFile) {
   db.callSituational = merged.rows;
   return merged.counts;
 }
+function pivots(db, incoming, mode, sourceFile) {
+  requireMode(mode);
+  db.ritPivots = Array.isArray(db.ritPivots) ? db.ritPivots : [];
+  if (mode === 'replace' && sourceFile) {
+    db.ritPivots = db.ritPivots.filter(r => r.sourceFile !== sourceFile);
+  }
+  const merged = mergeRows(db.ritPivots, incoming, 'pivot');
+  db.ritPivots = merged.rows;
+  return merged.counts;
+}
+
 function monthlyScores(db, incoming, mode, sourceFile, channel) {
   requireMode(mode);
   db.monthlyScores = Array.isArray(db.monthlyScores) ? db.monthlyScores : [];
@@ -357,6 +368,15 @@ function storeRawRows(db, name, rows) {
     headers: Object.keys(rows[0] || {}),
     rows: rows.slice(0, RIT_RAW_MAX_ROWS)
   };
+}
+
+/* تاریخ از نام فایل پيورگ (مثل qc_army_pivote_2026-11-21T17_24_56…) استخراج می‌شود
+ * تا ریت‌های بدون ستون تاریخ در ماه مالی درست قرار گیرند. */
+function pivotDateFromName(name) {
+  const m = String(name || '').match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!m) return '';
+  const j = C.parseDate(m[1] + '/' + m[2] + '/' + m[3]);
+  return j ? C.formatJalali(j) : '';
 }
 
 function callFiles(db, files, options) {
@@ -473,6 +493,30 @@ function callFiles(db, files, options) {
     resultsByIdx[item.idx] = (msOut.results && msOut.results[0]) || { name: item.name, ok: false, kind: 'monthly_score', reason: 'خطا در ورود فایل نمره ماهانه' };
   }
 
+  /* پيورگ ریت: هر سلول = تعداد ریتِ یک کارشناس کیوسی (ستون) برای یک کارشناس فروش (ردیف) */
+  for (const item of prepared) {
+    if (item.kind !== 'pivot') continue;
+    const parsed = P.parsePivotRows(item.rows, { sourceFile: item.name });
+    if (!parsed.length) {
+      resultsByIdx[item.idx] = { name: item.name, ok: false, kind: 'pivot', reason: 'ردیفی یافت نشد' };
+      continue;
+    }
+    const team = String((item.f && item.f.team) || teamOpt || '');
+    const fallbackDate = pivotDateFromName(item.name);
+    parsed.forEach((r) => {
+      r.team = team;
+      r.periodFrom = explicitFrom || fallbackDate;
+      r.periodTo = explicitTo || r.periodFrom;
+    });
+    const merged = pivots(db, parsed, mode, item.name);
+    storeRawRows(db, item.name, item.rows);
+    resultsByIdx[item.idx] = {
+      name: item.name, ok: true, kind: 'pivot',
+      count: parsed.length, periodFrom: parsed[0].periodFrom, periodTo: parsed[0].periodTo,
+      changes: merged
+    };
+  }
+
   /* اگر قبلاً فایل موقعیتی بدون بازه تاریخ آپلود شده بود و اکنون فایل ثابت هم‌تیم آمد،
    * بازه و اتصال آن رکوردهای موقعیتی به‌صورت خودکار تکمیل می‌شود. */
   for (const ft of Object.keys(batchRanges)) {
@@ -530,7 +574,7 @@ function deleteSourceFile(db, fileName, kind) {
   db.callSituational = Array.isArray(db.callSituational) ? db.callSituational : [];
   db.monthlyScores = Array.isArray(db.monthlyScores) ? db.monthlyScores : [];
 
-  let removedCalls = 0, removedSituational = 0, removedMonthly = 0;
+  let removedCalls = 0, removedSituational = 0, removedMonthly = 0, removedPivots = 0;
 
   if (!k || k === 'form' || k === 'fixed' || k === 'recovery') {
     const before = db.callFeedbacks.length;
@@ -562,8 +606,14 @@ function deleteSourceFile(db, fileName, kind) {
     removedMonthly = before - db.monthlyScores.length;
   }
 
+  if (!k || k === 'pivot') {
+    const before = (db.ritPivots || []).length;
+    db.ritPivots = (db.ritPivots || []).filter((r) => String(r && r.sourceFile || '').trim() !== name);
+    removedPivots = before - db.ritPivots.length;
+  }
+
   const counts = recomputeCallImportCounts(db, false);
-  const totalRemoved = removedCalls + removedSituational + removedMonthly;
+  const totalRemoved = removedCalls + removedSituational + removedMonthly + removedPivots;
   return {
     ok: true,
     name,
@@ -571,10 +621,11 @@ function deleteSourceFile(db, fileName, kind) {
     removedCalls,
     removedSituational,
     removedMonthly,
+    removedPivots,
     totalRemoved,
     counts
   };
 }
 
-return { requireMode, restore, calls, situational, monthlyScores, monthlyScoreFiles, callFiles, deleteSourceFile, mergeRows, mergeSituational, mergeMonthlyScores, validateBackup, semantic, stable };
+return { requireMode, restore, calls, situational, pivots, monthlyScores, monthlyScoreFiles, callFiles, deleteSourceFile, mergeRows, mergeSituational, mergeMonthlyScores, validateBackup, semantic, stable, pivotDateFromName, storeRawRows };
 });

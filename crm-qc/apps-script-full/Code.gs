@@ -844,12 +844,56 @@ function classifyMonthlyScoreFile(name, rows) {
   return null;
 }
 
+/* پيورگ ریت: ردیف‌ها کارشناسان فروش (ستون expert_name) و ستون‌های دیگر نام
+ * کارشناسان کیوسی با مقادیر عددی (تعداد ریت) هستند. هیچ ستون نمره‌ای ندارد. */
+function isPivotFile(rows) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const head = Object.keys(rows[0] || {});
+  const expertKey = head.find((k) => columnKey(k) === 'expert_name' || columnKey(k) === 'expertname'
+    || columnKey(k) === 'کارشناس' || columnKey(k) === 'نام کارشناس' || columnKey(k) === 'کارشناس فروش');
+  if (!expertKey) return false;
+  const scoreish = head.find((k) => /^(score|نمره)/i.test(columnKey(k)));
+  if (scoreish) return false;
+  const valueCols = head.filter((k) => k !== expertKey
+    && !/internal_code|code|phone|شماره|کد|تلفن/i.test(columnKey(k)));
+  if (valueCols.length < 2) return false;
+  return rows.some((r) => valueCols.some((k) => normalizeCount(r[k]) > 0));
+}
+
+/* تبدیل پيورگ → ردیف‌های (کارشناس فروش، کارشناس کیوسی، تعداد). ردیف‌های
+ * «مجموع/Total/میانگین» نادیده گرفته می‌شوند. */
+function parsePivotRows(rows, options) {
+  options = options || {};
+  const list = [];
+  for (const [index, r] of (rows || []).entries()) {
+    const expertKey = findKey(r, ['expert_name', 'expertname', 'کارشناس', 'نام کارشناس', 'کارشناس فروش']);
+    const rawName = expertKey ? normName(String(r[expertKey] == null ? '' : r[expertKey]).trim().replace(/^([\"'])(.*)\1$/, '$2')) : '';
+    if (!rawName || /^مجموع$|^جمع|^میانگین|^total$|^average$/i.test(rawName)) continue;
+    const cols = Object.keys(r).filter((k) => k !== expertKey
+      && !/internal_code|code|phone|شماره|کد|تلفن/i.test(columnKey(k)));
+    for (const col of cols) {
+      const n = normalizeCount(r[col]);
+      if (n > 0) {
+        list.push({
+          expertName: rawName,
+          qcAgent: normName(col),
+          count: n,
+          sourceFile: options.sourceFile ? String(options.sourceFile) : '',
+          sourceRow: index + 2
+        });
+      }
+    }
+  }
+  return list;
+}
+
 function classifyCallFile(name, rows, config, team) {
   const monthlyChan = classifyMonthlyScoreFile(name, rows);
   if (monthlyChan) return { kind: 'monthly_score', channel: monthlyChan, formType: monthlyChan };
-  const kind = isSituationalFile(name, rows) ? 'situational' : 'fixed';
+  if (isSituationalFile(name, rows)) return { kind: 'situational', formType: formTypeOfFileName(name) || sniffFormType(rows, config) || teamForm(team) };
+  if (isPivotFile(rows)) return { kind: 'pivot', formType: null };
   const formType = formTypeOfFileName(name) || sniffFormType(rows, config) || teamForm(team);
-  return { kind, formType };
+  return { kind: 'fixed', formType: formType };
 }
 
 function monthlyScoreRowKey(row) {
@@ -1255,9 +1299,9 @@ return {
   clearResolveCache: clearResolveCache,
   PARSER_VERSION: 4, anyToJalali, cleanQcDate, parseRows, parseSituationalRows,
   findRedlineReason, findQcComment,
-  isSituationalFile, classifyCallFile, situationalRowKey, dateRangeOfCalls,
+  isSituationalFile, isPivotFile, parsePivotRows, classifyCallFile, situationalRowKey, dateRangeOfCalls,
   classifyMonthlyScoreFile, parseMonthlyScoreRows, monthlyScoreRowKey,
-  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey,
+  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey, normalizeCount,
   criteriaFor, criteriaLabelsFor, labelOf, definitionsFor, defaults,
   situationalDefaults, situationalDefinitionsFor, situationalLabelOf,
   resolver, validateConfig, saveTeamConfig, hasConfiguration,
@@ -2754,6 +2798,17 @@ function situational(db, incoming, mode, sourceFile) {
   db.callSituational = merged.rows;
   return merged.counts;
 }
+function pivots(db, incoming, mode, sourceFile) {
+  requireMode(mode);
+  db.ritPivots = Array.isArray(db.ritPivots) ? db.ritPivots : [];
+  if (mode === 'replace' && sourceFile) {
+    db.ritPivots = db.ritPivots.filter(r => r.sourceFile !== sourceFile);
+  }
+  const merged = mergeRows(db.ritPivots, incoming, 'pivot');
+  db.ritPivots = merged.rows;
+  return merged.counts;
+}
+
 function monthlyScores(db, incoming, mode, sourceFile, channel) {
   requireMode(mode);
   db.monthlyScores = Array.isArray(db.monthlyScores) ? db.monthlyScores : [];
@@ -2839,6 +2894,15 @@ function storeRawRows(db, name, rows) {
     headers: Object.keys(rows[0] || {}),
     rows: rows.slice(0, RIT_RAW_MAX_ROWS)
   };
+}
+
+/* تاریخ از نام فایل پيورگ (مثل qc_army_pivote_2026-11-21T17_24_56…) استخراج می‌شود
+ * تا ریت‌های بدون ستون تاریخ در ماه مالی درست قرار گیرند. */
+function pivotDateFromName(name) {
+  const m = String(name || '').match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (!m) return '';
+  const j = C.parseDate(m[1] + '/' + m[2] + '/' + m[3]);
+  return j ? C.formatJalali(j) : '';
 }
 
 function callFiles(db, files, options) {
@@ -2955,6 +3019,30 @@ function callFiles(db, files, options) {
     resultsByIdx[item.idx] = (msOut.results && msOut.results[0]) || { name: item.name, ok: false, kind: 'monthly_score', reason: 'خطا در ورود فایل نمره ماهانه' };
   }
 
+  /* پيورگ ریت: هر سلول = تعداد ریتِ یک کارشناس کیوسی (ستون) برای یک کارشناس فروش (ردیف) */
+  for (const item of prepared) {
+    if (item.kind !== 'pivot') continue;
+    const parsed = P.parsePivotRows(item.rows, { sourceFile: item.name });
+    if (!parsed.length) {
+      resultsByIdx[item.idx] = { name: item.name, ok: false, kind: 'pivot', reason: 'ردیفی یافت نشد' };
+      continue;
+    }
+    const team = String((item.f && item.f.team) || teamOpt || '');
+    const fallbackDate = pivotDateFromName(item.name);
+    parsed.forEach((r) => {
+      r.team = team;
+      r.periodFrom = explicitFrom || fallbackDate;
+      r.periodTo = explicitTo || r.periodFrom;
+    });
+    const merged = pivots(db, parsed, mode, item.name);
+    storeRawRows(db, item.name, item.rows);
+    resultsByIdx[item.idx] = {
+      name: item.name, ok: true, kind: 'pivot',
+      count: parsed.length, periodFrom: parsed[0].periodFrom, periodTo: parsed[0].periodTo,
+      changes: merged
+    };
+  }
+
   /* اگر قبلاً فایل موقعیتی بدون بازه تاریخ آپلود شده بود و اکنون فایل ثابت هم‌تیم آمد،
    * بازه و اتصال آن رکوردهای موقعیتی به‌صورت خودکار تکمیل می‌شود. */
   for (const ft of Object.keys(batchRanges)) {
@@ -3012,7 +3100,7 @@ function deleteSourceFile(db, fileName, kind) {
   db.callSituational = Array.isArray(db.callSituational) ? db.callSituational : [];
   db.monthlyScores = Array.isArray(db.monthlyScores) ? db.monthlyScores : [];
 
-  let removedCalls = 0, removedSituational = 0, removedMonthly = 0;
+  let removedCalls = 0, removedSituational = 0, removedMonthly = 0, removedPivots = 0;
 
   if (!k || k === 'form' || k === 'fixed' || k === 'recovery') {
     const before = db.callFeedbacks.length;
@@ -3044,8 +3132,14 @@ function deleteSourceFile(db, fileName, kind) {
     removedMonthly = before - db.monthlyScores.length;
   }
 
+  if (!k || k === 'pivot') {
+    const before = (db.ritPivots || []).length;
+    db.ritPivots = (db.ritPivots || []).filter((r) => String(r && r.sourceFile || '').trim() !== name);
+    removedPivots = before - db.ritPivots.length;
+  }
+
   const counts = recomputeCallImportCounts(db, false);
-  const totalRemoved = removedCalls + removedSituational + removedMonthly;
+  const totalRemoved = removedCalls + removedSituational + removedMonthly + removedPivots;
   return {
     ok: true,
     name,
@@ -3053,12 +3147,13 @@ function deleteSourceFile(db, fileName, kind) {
     removedCalls,
     removedSituational,
     removedMonthly,
+    removedPivots,
     totalRemoved,
     counts
   };
 }
 
-return { requireMode, restore, calls, situational, monthlyScores, monthlyScoreFiles, callFiles, deleteSourceFile, mergeRows, mergeSituational, mergeMonthlyScores, validateBackup, semantic, stable };
+return { requireMode, restore, calls, situational, pivots, monthlyScores, monthlyScoreFiles, callFiles, deleteSourceFile, mergeRows, mergeSituational, mergeMonthlyScores, validateBackup, semantic, stable, pivotDateFromName, storeRawRows };
 });
 
 
@@ -4642,6 +4737,8 @@ return {
     (db.callFeedbacks || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.reviewDate, r.formType, r.team, r.sourceFile, r.sourceRow, 1));
     (db.tickets || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'ticket', r.team, r.sourceFile || '', 0, 1));
     (db.socials || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'social', r.team, r.sourceFile || '', 0, 1));
+    /* پيورگ ریت: هر سلول = تعداد ریت یک کارشناس کیوسی برای یک کارشناس فروش */
+    (db.ritPivots || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.periodFrom, 'pivot', r.team, r.sourceFile, r.sourceRow, r.count || 1));
     /* ردیف‌های ماهانه (بدون کارشناس کیوسی) فقط در جمع تیم‌ها لحاظ می‌شوند */
     (db.monthlyScores || []).forEach((r) => push(r, r.expertName, '', r.periodFrom, r.channel, r.team, r.sourceFile, r.sourceRow, r.evalCount || 1));
     return out;
@@ -4670,7 +4767,7 @@ return {
     const experts = new Map();
     const agents = new Map();
     const teams = new Map();
-    const totals = { all: 0, calls: 0, tickets: 0, socials: 0, withQc: 0 };
+    const totals = { all: 0, calls: 0, tickets: 0, socials: 0, pivot: 0, withQc: 0 };
 
     rows.forEach((r) => {
       totals.all += r.count;
@@ -4678,6 +4775,7 @@ return {
       if (r.form === 'tele' || r.form === 'account' || r.form === 'mlm') totals.calls += r.count;
       else if (r.form === 'ticket') totals.tickets += r.count;
       else if (r.form === 'social') totals.socials += r.count;
+      else if (r.form === 'pivot') totals.pivot += r.count;
 
       if (r.team) teams.set(r.team, (teams.get(r.team) || 0) + r.count);
 
@@ -4743,6 +4841,7 @@ return {
       let kind = 'form', type = r.form;
       if (r.form === 'ticket' || r.form === 'social') { kind = r.form === 'ticket' ? 'ticket' : 'social'; type = r.form; }
       else if (r.form === 'tele' || r.form === 'account' || r.form === 'mlm') { kind = 'form'; }
+      else if (r.form === 'pivot') { kind = 'pivot'; }
       else { kind = 'monthly'; }
       touch(ensure(r.file, kind, type), r);
     });
@@ -4822,9 +4921,16 @@ return {
       const agentCol = findCol(headers, AGENT_COLS);
       const dateCol = findCol(headers, DATE_COLS);
       const teamCol = findCol(headers, TEAM_COLS);
+      /* فایل پيورگ: کارشناس کیوسی ستونِ داده است (نه سلول) — در صورت درخواست
+       * کارشناس کیوسی، فقط ردیف‌هایی که مقدار غیرنخوده برای آن ستون دارند برمی‌گردند. */
+      const pivotMode = !qcCol && !!agentCol && !!qcWant && headers.some((h) => norm(h) === qcWant);
+      const qcColIdx = pivotMode ? headers.findIndex((h) => norm(h) === qcWant) : (qcCol ? headers.indexOf(qcCol) : -1);
+      const qcKey = qcColIdx >= 0 ? headers[qcColIdx] : qcCol;
       (entry.rows || []).forEach((cells, i) => {
         total++;
-        if (qcWant && !(qcCol && norm(cells[qcCol]) === qcWant)) return;
+        if (qcWant && !pivotMode && !(qcCol && norm(cells[qcCol]) === qcWant)) return;
+        if (pivotMode && (P.normalizeCount(cells[qcKey]) <= 0
+          || /^مجموع$|^جمع|^میانگین|^total$|^average$/i.test(norm(agentCol ? cells[agentCol] : '')))) return;
         if (agentWant && !(agentCol && norm(cells[agentCol]) === agentWant)) return;
         if (allowed && agentCol && !allowed.some((a) => norm(cells[agentCol]) === a)) return;
         if (teamWant && !(teamCol && norm(cells[teamCol]) === norm(teamWant))) return;
@@ -4833,7 +4939,7 @@ return {
           if (!inRange(d, from, to)) return;
         }
         if (out.length >= limit) return;
-        out.push({ row: (i + 1), file: name, cells: cells });
+        out.push({ row: (i + 1), file: name, cells: cells, pivot: pivotMode });
       });
     });
     const headers = out.length ? Object.keys(out[0].cells) : (entries[0] ? (entries[0][1].headers || []) : []);
@@ -5776,6 +5882,7 @@ var QC_GAS_SHEETS = {
   callReportAccess: 'Call_Report_Access',
   fiscalMonths: 'Fiscal_Months',
   ritTargets: 'Rit_Targets',
+  ritPivots: 'Rit_Pivots',
   qcUsers: 'QC_Users',
   elements: 'Elements',
   monthlySummary: 'Monthly_Summary'
@@ -5804,6 +5911,8 @@ var QC_GAS_SCHEMAS = {
   Fiscal_Months: ['id', 'name', 'from', 'to', 'note'],
   /* معیار تارگت ریت ماهانه‌ی تیم‌ها (آمار ریت) */
   Rit_Targets: ['id', 'team', 'month', 'target', 'note', 'updatedAt'],
+  /* سلول‌های پيورگ ریت: هر ردیف = (کارشناس فروش، کارشناس کیوسی، تعداد) */
+  Rit_Pivots: ['expertName', 'qcAgent', 'count', 'team', 'periodFrom', 'periodTo', 'sourceFile', 'sourceRow', 'importedAt'],
   /* کاربران QC: نام، رمز، نقش، فعال و دسترسی‌ها (بند ۵) */
   QC_Users: ['id', 'name', 'password', 'role', 'active', 'exts', 'agents', 'teams', 'note'],
   /* نگاشت المان‌ها: نام فارسی و ستون اکسل، قابل ویرایش روی شیت (بند ۹) */
@@ -5840,9 +5949,9 @@ var QC_GAS_TAB_REV_KEY = 'QC_GAS_TAB_REV';
 var QC_GAS_TAB_PREFIX = 'qctab@';
 var QC_GAS_TAB_KEYS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
   'tickets', 'socials', 'callFeedbacks', 'callSituational', 'monthlyScores', 'agentActions', 'actionTypes', 'fiscalMonths', 'qcUsers',
-  'elements', 'reminders', 'ritTargets'];
+  'elements', 'reminders', 'ritTargets', 'ritPivots'];
 var QC_GAS_SMALL_TABS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
-  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements', 'ritTargets'];
+  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements', 'ritTargets', 'ritPivots'];
 var QC_GAS_CHANGE_HANDLER = 'crmqcOnSheetChange';
 /* کش نتیجه‌ی تحلیل‌ها: کلید = نسخه‌ی داده + کاربر + مسیر؛ با هر نوشتن باطل می‌شود. */
 var QC_GAS_ANALYSIS_PREFIX = 'qcan-sec2@';
@@ -7034,7 +7143,8 @@ function wantedTabsFor_(method, pathOnly, body) {
     if (p.indexOf('/api/tickets') === 0) return withSmall_(['tickets']);
     if (p.indexOf('/api/socials') === 0) return withSmall_(['socials']);
     if (p.indexOf('/api/calls/analysis') === 0) return withSmall_(['callFeedbacks', 'callSituational']);
-    if (p.indexOf('/api/calls') === 0) return withSmall_(['callFeedbacks', 'callSituational', 'monthlyScores']);
+    if (p.indexOf('/api/calls') === 0) return withSmall_(['callFeedbacks', 'callSituational', 'monthlyScores', 'ritPivots']);
+    if (p.indexOf('/api/rit') === 0) return withSmall_(['tickets', 'socials', 'callFeedbacks', 'monthlyScores', 'ritPivots']);
     if (p.indexOf('/api/monthly-scores') === 0) return withSmall_(['monthlyScores', 'callFeedbacks']);
     if (p.indexOf('/api/actions') === 0) return withSmall_(['agentActions']);
     if (p.indexOf('/api/reminders') === 0) return withSmall_(['reminders']);
@@ -7047,7 +7157,7 @@ function wantedTabsFor_(method, pathOnly, body) {
   var heavy;
   if (p.indexOf('/api/tickets') === 0) heavy = ['tickets'];
   else if (p.indexOf('/api/socials') === 0) heavy = ['socials'];
-  else if (p.indexOf('/api/calls') === 0) heavy = ['callFeedbacks', 'callSituational', 'monthlyScores'];
+  else if (p.indexOf('/api/calls') === 0) heavy = ['callFeedbacks', 'callSituational', 'monthlyScores', 'ritPivots'];
   else if (p.indexOf('/api/monthly-scores') === 0) heavy = ['monthlyScores', 'callFeedbacks'];
   else if (p.indexOf('/api/actions') === 0) heavy = ['agentActions'];
   else if (p.indexOf('/api/reminders') === 0) heavy = ['reminders'];
@@ -7149,6 +7259,7 @@ function makeSeedDatabase_() {
     registryCleared: false,
     fiscalMonths: [],
     ritTargets: [],
+    ritPivots: [],
     qcUsers: []
   });
 }
@@ -7172,6 +7283,7 @@ function normalizeDatabase_(db) {
   db.reminders = Array.isArray(db.reminders) ? db.reminders : [];
   db.fiscalMonths = window.QCFiscal.normalizeMonths(db.fiscalMonths);
   db.ritTargets = Array.isArray(db.ritTargets) ? db.ritTargets : [];
+  db.ritPivots = Array.isArray(db.ritPivots) ? db.ritPivots : [];
   db.qcUsers = Array.isArray(db.qcUsers) ? db.qcUsers : [];
   if (!db.settings.authMode) db.settings.authMode = 'auto';
   db.callImport = db.callImport || null;
@@ -7310,6 +7422,7 @@ function readDatabase_(ssOrFn, wanted, info) {
     actionTypes: actionTypes.length ? actionTypes : undefined,
     reminders: raw('reminders', function () { return rows(QC_GAS_SHEETS.reminders); }) || [],
     ritTargets: raw('ritTargets', function () { return rows(QC_GAS_SHEETS.ritTargets); }) || [],
+    ritPivots: raw('ritPivots', function () { return rows(QC_GAS_SHEETS.ritPivots); }) || [],
     settings: settings,
     lists: lists
   };
@@ -7531,6 +7644,9 @@ function writeDatabaseDiffFp_(ss, beforeJson, after, forceAll, only) {
   });
   if (changed('ritTargets')) write('ritTargets', function () {
     return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.ritTargets), rows('ritTargets') || [], units.ritTargets, 'Rit_Targets');
+  });
+  if (changed('ritPivots')) write('ritPivots', function () {
+    return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.ritPivots), rows('ritPivots') || [], units.ritPivots, 'Rit_Pivots');
   });
   if (changed('qcAgents')) write('qcAgents', function () {
     return writeRowsSheet_(sheets[QC_GAS_SHEETS.qcAgents], rows('qcAgents') || [], units.qcAgents, 'QC_Agents');

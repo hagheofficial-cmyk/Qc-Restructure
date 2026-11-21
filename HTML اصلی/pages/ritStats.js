@@ -221,7 +221,7 @@ App.register('ritstats', {
             </div>
             <div class="table-wrap">
               <table class="tbl">
-                <thead><tr><th>کارشناس فروش</th><th>تیم</th><th>ریت کل</th><th>تماس</th><th>اکانت</th><th>MLM</th><th>تیکت</th><th>سوشال</th><th>فایل‌های منبع</th><th></th></tr></thead>
+                <thead><tr><th>کارشناس فروش</th><th>تیم</th><th>ریت کل</th><th>تماس</th><th>اکانت</th><th>MLM</th><th>تیکت</th><th>سوشال</th><th>پيورگ</th><th>فایل‌های منبع</th><th></th></tr></thead>
                 <tbody>${ex.byAgent.map((ag) => `<tr>
                   <td class="cell-main">${esc(ag.agent)}</td>
                   <td>${esc(ag.team || teamOf(ag.agent) || '—')}</td>
@@ -231,6 +231,7 @@ App.register('ritstats', {
                   <td>${ag.forms.mlm || 0}</td>
                   <td>${ag.forms.ticket || 0}</td>
                   <td>${ag.forms.social || 0}</td>
+                  <td>${ag.forms.pivot || 0}</td>
                   <td style="font-size:11.5px;color:var(--muted)">${(ag.files || []).map((f) => esc(f.file) + ' (' + fa(f.count) + ')').join('، ') || '—'}</td>
                   <td><button type="button" class="btn soft sm rt-open" data-qc="${esc(ex.qc)}" data-agent="${esc(ag.agent)}"><i class="fa-solid fa-table"></i> بازکردن</button></td>
                 </tr>`).join('')}</tbody>
@@ -434,7 +435,8 @@ App.register('ritstats', {
           situational: { label: 'موقعیتی', cls: 'blue' },
           monthly: { label: 'ماهانه', cls: 'blue' },
           ticket: { label: 'تیکت', cls: 'violet' },
-          social: { label: 'سوشال', cls: 'violet' }
+          social: { label: 'سوشال', cls: 'violet' },
+          pivot: { label: 'پيورگ ریت', cls: 'amber' }
         };
         const arrow = (k) => (fileSort.key === k ? (fileSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
         const th = (k, label) => `<th class="rt-sort" data-sort="${k}" style="cursor:pointer">${label}${arrow(k)}</th>`;

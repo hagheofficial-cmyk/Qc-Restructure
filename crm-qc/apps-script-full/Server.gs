@@ -36,6 +36,7 @@ var QC_GAS_SHEETS = {
   callReportAccess: 'Call_Report_Access',
   fiscalMonths: 'Fiscal_Months',
   ritTargets: 'Rit_Targets',
+  ritPivots: 'Rit_Pivots',
   qcUsers: 'QC_Users',
   elements: 'Elements',
   monthlySummary: 'Monthly_Summary'
@@ -64,6 +65,8 @@ var QC_GAS_SCHEMAS = {
   Fiscal_Months: ['id', 'name', 'from', 'to', 'note'],
   /* معیار تارگت ریت ماهانه‌ی تیم‌ها (آمار ریت) */
   Rit_Targets: ['id', 'team', 'month', 'target', 'note', 'updatedAt'],
+  /* سلول‌های پيورگ ریت: هر ردیف = (کارشناس فروش، کارشناس کیوسی، تعداد) */
+  Rit_Pivots: ['expertName', 'qcAgent', 'count', 'team', 'periodFrom', 'periodTo', 'sourceFile', 'sourceRow', 'importedAt'],
   /* کاربران QC: نام، رمز، نقش، فعال و دسترسی‌ها (بند ۵) */
   QC_Users: ['id', 'name', 'password', 'role', 'active', 'exts', 'agents', 'teams', 'note'],
   /* نگاشت المان‌ها: نام فارسی و ستون اکسل، قابل ویرایش روی شیت (بند ۹) */
@@ -100,9 +103,9 @@ var QC_GAS_TAB_REV_KEY = 'QC_GAS_TAB_REV';
 var QC_GAS_TAB_PREFIX = 'qctab@';
 var QC_GAS_TAB_KEYS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
   'tickets', 'socials', 'callFeedbacks', 'callSituational', 'monthlyScores', 'agentActions', 'actionTypes', 'fiscalMonths', 'qcUsers',
-  'elements', 'reminders', 'ritTargets'];
+  'elements', 'reminders', 'ritTargets', 'ritPivots'];
 var QC_GAS_SMALL_TABS = ['meta', 'settings', 'lists', 'criteria', 'callMeta', 'agents', 'qcAgents',
-  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements', 'ritTargets'];
+  'actionTypes', 'fiscalMonths', 'qcUsers', 'elements', 'ritTargets', 'ritPivots'];
 var QC_GAS_CHANGE_HANDLER = 'crmqcOnSheetChange';
 /* کش نتیجه‌ی تحلیل‌ها: کلید = نسخه‌ی داده + کاربر + مسیر؛ با هر نوشتن باطل می‌شود. */
 var QC_GAS_ANALYSIS_PREFIX = 'qcan-sec2@';
@@ -1294,7 +1297,8 @@ function wantedTabsFor_(method, pathOnly, body) {
     if (p.indexOf('/api/tickets') === 0) return withSmall_(['tickets']);
     if (p.indexOf('/api/socials') === 0) return withSmall_(['socials']);
     if (p.indexOf('/api/calls/analysis') === 0) return withSmall_(['callFeedbacks', 'callSituational']);
-    if (p.indexOf('/api/calls') === 0) return withSmall_(['callFeedbacks', 'callSituational', 'monthlyScores']);
+    if (p.indexOf('/api/calls') === 0) return withSmall_(['callFeedbacks', 'callSituational', 'monthlyScores', 'ritPivots']);
+    if (p.indexOf('/api/rit') === 0) return withSmall_(['tickets', 'socials', 'callFeedbacks', 'monthlyScores', 'ritPivots']);
     if (p.indexOf('/api/monthly-scores') === 0) return withSmall_(['monthlyScores', 'callFeedbacks']);
     if (p.indexOf('/api/actions') === 0) return withSmall_(['agentActions']);
     if (p.indexOf('/api/reminders') === 0) return withSmall_(['reminders']);
@@ -1307,7 +1311,7 @@ function wantedTabsFor_(method, pathOnly, body) {
   var heavy;
   if (p.indexOf('/api/tickets') === 0) heavy = ['tickets'];
   else if (p.indexOf('/api/socials') === 0) heavy = ['socials'];
-  else if (p.indexOf('/api/calls') === 0) heavy = ['callFeedbacks', 'callSituational', 'monthlyScores'];
+  else if (p.indexOf('/api/calls') === 0) heavy = ['callFeedbacks', 'callSituational', 'monthlyScores', 'ritPivots'];
   else if (p.indexOf('/api/monthly-scores') === 0) heavy = ['monthlyScores', 'callFeedbacks'];
   else if (p.indexOf('/api/actions') === 0) heavy = ['agentActions'];
   else if (p.indexOf('/api/reminders') === 0) heavy = ['reminders'];
@@ -1409,6 +1413,7 @@ function makeSeedDatabase_() {
     registryCleared: false,
     fiscalMonths: [],
     ritTargets: [],
+    ritPivots: [],
     qcUsers: []
   });
 }
@@ -1432,6 +1437,7 @@ function normalizeDatabase_(db) {
   db.reminders = Array.isArray(db.reminders) ? db.reminders : [];
   db.fiscalMonths = window.QCFiscal.normalizeMonths(db.fiscalMonths);
   db.ritTargets = Array.isArray(db.ritTargets) ? db.ritTargets : [];
+  db.ritPivots = Array.isArray(db.ritPivots) ? db.ritPivots : [];
   db.qcUsers = Array.isArray(db.qcUsers) ? db.qcUsers : [];
   if (!db.settings.authMode) db.settings.authMode = 'auto';
   db.callImport = db.callImport || null;
@@ -1570,6 +1576,7 @@ function readDatabase_(ssOrFn, wanted, info) {
     actionTypes: actionTypes.length ? actionTypes : undefined,
     reminders: raw('reminders', function () { return rows(QC_GAS_SHEETS.reminders); }) || [],
     ritTargets: raw('ritTargets', function () { return rows(QC_GAS_SHEETS.ritTargets); }) || [],
+    ritPivots: raw('ritPivots', function () { return rows(QC_GAS_SHEETS.ritPivots); }) || [],
     settings: settings,
     lists: lists
   };
@@ -1791,6 +1798,9 @@ function writeDatabaseDiffFp_(ss, beforeJson, after, forceAll, only) {
   });
   if (changed('ritTargets')) write('ritTargets', function () {
     return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.ritTargets), rows('ritTargets') || [], units.ritTargets, 'Rit_Targets');
+  });
+  if (changed('ritPivots')) write('ritPivots', function () {
+    return writeRowsSheet_(ensureTab(QC_GAS_SHEETS.ritPivots), rows('ritPivots') || [], units.ritPivots, 'Rit_Pivots');
   });
   if (changed('qcAgents')) write('qcAgents', function () {
     return writeRowsSheet_(sheets[QC_GAS_SHEETS.qcAgents], rows('qcAgents') || [], units.qcAgents, 'QC_Agents');

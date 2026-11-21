@@ -418,12 +418,56 @@ function classifyMonthlyScoreFile(name, rows) {
   return null;
 }
 
+/* پيورگ ریت: ردیف‌ها کارشناسان فروش (ستون expert_name) و ستون‌های دیگر نام
+ * کارشناسان کیوسی با مقادیر عددی (تعداد ریت) هستند. هیچ ستون نمره‌ای ندارد. */
+function isPivotFile(rows) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const head = Object.keys(rows[0] || {});
+  const expertKey = head.find((k) => columnKey(k) === 'expert_name' || columnKey(k) === 'expertname'
+    || columnKey(k) === 'کارشناس' || columnKey(k) === 'نام کارشناس' || columnKey(k) === 'کارشناس فروش');
+  if (!expertKey) return false;
+  const scoreish = head.find((k) => /^(score|نمره)/i.test(columnKey(k)));
+  if (scoreish) return false;
+  const valueCols = head.filter((k) => k !== expertKey
+    && !/internal_code|code|phone|شماره|کد|تلفن/i.test(columnKey(k)));
+  if (valueCols.length < 2) return false;
+  return rows.some((r) => valueCols.some((k) => normalizeCount(r[k]) > 0));
+}
+
+/* تبدیل پيورگ → ردیف‌های (کارشناس فروش، کارشناس کیوسی، تعداد). ردیف‌های
+ * «مجموع/Total/میانگین» نادیده گرفته می‌شوند. */
+function parsePivotRows(rows, options) {
+  options = options || {};
+  const list = [];
+  for (const [index, r] of (rows || []).entries()) {
+    const expertKey = findKey(r, ['expert_name', 'expertname', 'کارشناس', 'نام کارشناس', 'کارشناس فروش']);
+    const rawName = expertKey ? normName(String(r[expertKey] == null ? '' : r[expertKey]).trim().replace(/^([\"'])(.*)\1$/, '$2')) : '';
+    if (!rawName || /^مجموع$|^جمع|^میانگین|^total$|^average$/i.test(rawName)) continue;
+    const cols = Object.keys(r).filter((k) => k !== expertKey
+      && !/internal_code|code|phone|شماره|کد|تلفن/i.test(columnKey(k)));
+    for (const col of cols) {
+      const n = normalizeCount(r[col]);
+      if (n > 0) {
+        list.push({
+          expertName: rawName,
+          qcAgent: normName(col),
+          count: n,
+          sourceFile: options.sourceFile ? String(options.sourceFile) : '',
+          sourceRow: index + 2
+        });
+      }
+    }
+  }
+  return list;
+}
+
 function classifyCallFile(name, rows, config, team) {
   const monthlyChan = classifyMonthlyScoreFile(name, rows);
   if (monthlyChan) return { kind: 'monthly_score', channel: monthlyChan, formType: monthlyChan };
-  const kind = isSituationalFile(name, rows) ? 'situational' : 'fixed';
+  if (isSituationalFile(name, rows)) return { kind: 'situational', formType: formTypeOfFileName(name) || sniffFormType(rows, config) || teamForm(team) };
+  if (isPivotFile(rows)) return { kind: 'pivot', formType: null };
   const formType = formTypeOfFileName(name) || sniffFormType(rows, config) || teamForm(team);
-  return { kind, formType };
+  return { kind: 'fixed', formType: formType };
 }
 
 function monthlyScoreRowKey(row) {
@@ -829,9 +873,9 @@ return {
   clearResolveCache: clearResolveCache,
   PARSER_VERSION: 4, anyToJalali, cleanQcDate, parseRows, parseSituationalRows,
   findRedlineReason, findQcComment,
-  isSituationalFile, classifyCallFile, situationalRowKey, dateRangeOfCalls,
+  isSituationalFile, isPivotFile, parsePivotRows, classifyCallFile, situationalRowKey, dateRangeOfCalls,
   classifyMonthlyScoreFile, parseMonthlyScoreRows, monthlyScoreRowKey,
-  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey,
+  formTypeOfFileName, sniffFormType, normName, isRedline, callRowKey, normalizeCount,
   criteriaFor, criteriaLabelsFor, labelOf, definitionsFor, defaults,
   situationalDefaults, situationalDefinitionsFor, situationalLabelOf,
   resolver, validateConfig, saveTeamConfig, hasConfiguration,
