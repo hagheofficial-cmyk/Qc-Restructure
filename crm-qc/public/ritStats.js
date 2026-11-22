@@ -91,6 +91,41 @@
     return days;
   }
 
+  /* کسرِ هم‌پوشانی بازه‌ی رکورد [periodFrom, periodTo] با فیلتر [from, to]:
+   * ۱ بدون فیلتر، ۰ بدون هم‌پوشانی، و در غیر این صورت تعداد روز هم‌پوشانی
+   * بر طول بازه‌ی رکورد. برای رکوردهای دوره‌دار (ماهانه/پيورگ)ใช้ می‌شود تا
+   * در بازه‌های قطعی (مثل ماه مالی ۲۰→۱۹) فقط سهم هم‌پوشانی حساب شود. */
+  function overlapFraction(periodFrom, periodTo, from, to) {
+    if (!from && !to) return 1;
+    const a = C.parseDate(periodFrom);
+    const b = C.parseDate(periodTo || periodFrom);
+    if (!a || !b) return 0;
+    if (C.jalaliCmp(a, b) > 0) return 0;
+    const f = from ? C.parseDate(from) : null;
+    const t = to ? C.parseDate(to) : null;
+    if (f && C.jalaliCmp(b, f) < 0) return 0;
+    if (t && C.jalaliCmp(a, t) > 0) return 0;
+    const s = (f && C.jalaliCmp(f, a) > 0) ? f : a;
+    const e = (t && C.jalaliCmp(t, b) < 0) ? t : b;
+    const total = dayDiff(a, b) + 1;
+    const ov = dayDiff(s, e) + 1;
+    return total > 0 ? Math.min(1, Math.max(0, ov / total)) : 0;
+  }
+
+  /* هم‌پوشانی بازه‌ی رکورد با فیلتر؛ برایش scaling می‌دهد:
+   * - رکوردهای دوره‌دار: فقط سهم هم‌پوشانی (برابری)
+   * - رکوردهای تک‌تاریخ: در بازه بودن/ نبودن
+   * برون می‌برد null در صورت عدم تطبیق. */
+  function rangeScale(r, from, to) {
+    if (r.periodFrom && (r.isMonthly || r.periodTo)) {
+      const ovf = overlapFraction(r.periodFrom, r.periodTo, from, to);
+      if (ovf <= 0) return null;
+      return Math.max(0, Math.round((r.count || 1) * ovf));
+    }
+    if (!inRange(r.date, from, to)) return null;
+    return r.count || 1;
+  }
+
   function jalaliNextDay(d) {
     const jd = d.jd + 1;
     const monthDays = jalaliDaysInMonth(d.jy, d.jm);
@@ -112,25 +147,28 @@
   }
 
   /* ----------------------------------------------------------- منابع ریت */
-  /* همه‌ی ردیف‌های دارای کارشناس کیوسی را به شکلی یکسان نماینده‌سازی می‌کند. */
+  /* همه‌ی ردیف‌های دارای کارشناس کیوسی را به شکلی یکسان نماینده‌سازی می‌کند.
+   * ردیف‌های دوره‌دار (ماهانه، و پيورگ با بازه) periodFrom/periodTo و isMonthly را
+   * یدک می‌گیرند تا در فیلتر بازه فقط سهم هم‌پوشانی آن‌ها لحاظ شود. */
   function ritRows(db) {
     const out = [];
-    const push = (r, agent, qc, date, form, team, file, row, count) => {
+    const push = (r, agent, qc, date, form, team, file, row, count, periodFrom, periodTo, isMonthly) => {
       if (!agent && !qc) return;
       out.push({
         agent: norm(agent), agentRaw: text(agent),
         qc: norm(qc), qcRaw: text(qc),
         date: text(date), form: text(form), team: text(team),
-        file: text(file), row: row == null ? 0 : row, count: count || 1
+        file: text(file), row: row == null ? 0 : row, count: count || 1,
+        periodFrom: text(periodFrom), periodTo: text(periodTo), isMonthly: !!isMonthly
       });
     };
     (db.callFeedbacks || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.reviewDate, r.formType, r.team, r.sourceFile, r.sourceRow, 1));
     (db.tickets || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'ticket', r.team, r.sourceFile || '', 0, 1));
     (db.socials || []).forEach((r) => push(r, r.agentName, r.qcAgent, r.reviewDate, 'social', r.team, r.sourceFile || '', 0, 1));
     /* پيورگ ریت: هر سلول = تعداد ریت یک کارشناس کیوسی برای یک کارشناس فروش */
-    (db.ritPivots || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.periodFrom, 'pivot', r.team, r.sourceFile, r.sourceRow, r.count || 1));
+    (db.ritPivots || []).forEach((r) => push(r, r.expertName, r.qcAgent, r.periodFrom, 'pivot', r.team, r.sourceFile, r.sourceRow, r.count || 1, r.periodFrom, r.periodTo || r.periodFrom, false));
     /* ردیف‌های ماهانه (بدون کارشناس کیوسی) فقط در جمع تیم‌ها لحاظ می‌شوند */
-    (db.monthlyScores || []).forEach((r) => push(r, r.expertName, '', r.periodFrom, r.channel, r.team, r.sourceFile, r.sourceRow, r.evalCount || 1));
+    (db.monthlyScores || []).forEach((r) => push(r, r.expertName, '', r.periodFrom, r.channel, r.team, r.sourceFile, r.sourceRow, r.evalCount || 1, r.periodFrom, r.periodTo || r.periodFrom, true));
     return out;
   }
 
@@ -151,8 +189,11 @@
   function stats(db, opts) {
     opts = opts || {};
     const from = text(opts.from), to = text(opts.to);
-    const rows = ritRows(db).filter((r) => inRange(r.date, from, to)
-      && matchTeam(r.team, opts.team) && matchTeam(r.qc, opts.qcAgent));
+    /* رکوردهای دوره‌دار (ماهانه/پيورگ) فقط سهم هم‌پوشانی بازه را محاسبات می‌گیرند */
+    const rows = ritRows(db)
+      .map((r) => ({ r: r, scale: rangeScale(r, from, to) }))
+      .filter((x) => x.scale != null && matchTeam(x.r.team, opts.team) && matchTeam(x.r.qc, opts.qcAgent))
+      .map((x) => Object.assign({}, x.r, { count: x.scale }));
 
     const experts = new Map();
     const agents = new Map();
@@ -377,12 +418,15 @@
     return { ok: true, targets: targets(db) };
   }
 
-  /* جمع ریت‌های انجام‌شده در یک ماه مالی برای یک تیم (تماس + سوشال + تیکت) */
+  /* جمع ریت‌های انجام‌شده در یک ماه مالی برای یک تیم (تماس + سوشال + تیکت)
+   * رکوردهای دوره‌دار (ماهانه) با کسر هم‌پوشانی با ماه مالی محاسبه می‌شوند. */
   function monthTeamTotal(db, monthId, team) {
     const month = monthById(db, monthId);
     if (!month) return 0;
-    const rows = ritRows(db).filter((r) => inRange(r.date, month.from, month.to) && (!team || r.team === team));
-    return rows.reduce((sum, r) => sum + (r.count || 1), 0);
+    const rows = ritRows(db)
+      .map((r) => ({ r: r, scale: rangeScale(r, month.from, month.to) }))
+      .filter((x) => x.scale != null && (!team || x.r.team === team));
+    return rows.reduce((sum, x) => sum + x.scale, 0);
   }
 
   function targetsWithProgress(db) {

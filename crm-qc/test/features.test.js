@@ -2,6 +2,7 @@
 const test=require('node:test');const assert=require('node:assert/strict');
 const C=require('../shared/calc');const P=require('../shared/parseQc');const R=require('../shared/reports');
 const I=require('../shared/importData');const Registry=require('../shared/registry');
+const F=require('../shared/fiscal');
 const {fixture,clone,browser,go,settle}=require('./helpers');
 const DAY={from:'1405/06/20',to:'1405/06/20'};
 
@@ -164,4 +165,63 @@ test('socials form: فیلد ساعت متن است و تایپ مستقیم «1
   reply.value = '14:05'; reply.dispatchEvent(new w.Event('input', { bubbles: true }));
   assert.equal(reply.value, '14:05', 'ساعت پاسخ هم خودکار خوانده می‌شود');
   dom.window.close();
+});
+
+/* ------------------------------------------------------------- پروریشن بازه (هم‌پوشانی) */
+test('پروفایل کارشناس: رکوردهای ماهانه تیکت/سوشال فقط سهم هم‌پوشانی بازه را در نمره می‌گیرند', () => {
+  /* ماهانه تیکت: بازه ۲۰→۱۹، evalCount ۴۰، نمره ۸۰ */
+  const db = {
+    agents: [{ id: 1, name: 'الف', team: 'T', ext: 101 }],
+    monthlyScores: [
+      { expertName: 'الف', channel: 'ticket', periodFrom: '1405/07/20', periodTo: '1405/08/19', evalCount: 40, score: 80, team: 'T' },
+      { expertName: 'الف', channel: 'social', periodFrom: '1405/06/20', periodTo: '1405/07/19', evalCount: 10, score: 70, team: 'T' }
+    ]
+  };
+  /* بازه‌ی قطعی که فقط ۱۰ روز از ماهانه تیکت را پوشش می‌دهد — ماهانه قبلی هم‌پوشانی ندارد */
+  const info = R.agentProfile(db, 'الف', { from: '1405/08/10', to: '1405/09/10' });
+  assert.equal(info.tickets.count, 13); // ۴۰ × ۱۰/۳۱ ≈ ۱۲٫۹ → ۱۳
+  assert.equal(info.tickets.avgScore, 80);
+  assert.equal(info.tickets.source, 'monthly_excel');
+  assert.equal(info.socials.count, 0); // ماهانه سوشال قبلی بازه را پوشش نمی‌دهد
+  /* بازه‌ی کامل ماه مالی → تمام ۴۰ */
+  const full = R.agentProfile(db, 'الف', { from: '1405/07/20', to: '1405/08/19' });
+  assert.equal(full.tickets.count, 40);
+  assert.equal(full.socials.count, 0);
+});
+
+test('پروفایل کارشناس: رکوردهای موقعیتی فقط سهم هم‌پوشانی بازه را در تعداد فرم حساب می‌کنند', () => {
+  const db = {
+    agents: [{ id: 1, name: 'الف', team: 'T', ext: 101 }],
+    callSituational: [
+      { expertName: 'الف', formType: 'tele', periodFrom: '1405/07/20', periodTo: '1405/08/19', formsCount: 20, situationalScore: 85, team: 'T' }
+    ]
+  };
+  /* بازه: ۱۴05/08/15 → ۱۴05/09/15 — ۵ روز از ۳۱ روز بازه‌ی رکورد هم‌پوشانی دارد */
+  const info = R.agentProfile(db, 'الف', { from: '1405/08/15', to: '1405/09/15' });
+  assert.equal(info.situational.formsCount, 3); // ۲۰ × ۵/۳۱ ≈ ۳٫۲ → ۳
+  assert.equal(info.situational.avgScore, 85);
+  /* بازه کامل → تمام ۲۰ فرم */
+  const full = R.agentProfile(db, 'الف', { from: '1405/07/20', to: '1405/08/19' });
+  assert.equal(full.situational.formsCount, 20);
+});
+
+test('خلاصه‌ی ماهانه مالی: رکوردهای ماهانه فقط سهم هم‌پوشانی بازه را در جمع/نمره می‌گیرند', () => {
+  const db = {
+    fiscalMonths: [{ id: 'm1', name: 'آبان ۱۴۰۵', from: '1405/07/20', to: '1405/08/19' }],
+    agents: [{ name: 'الف', team: 'T' }],
+    monthlyScores: [
+      { expertName: 'الف', channel: 'ticket', periodFrom: '1405/07/20', periodTo: '1405/08/19', evalCount: 40, score: 80, team: 'T' },
+      { expertName: 'الف', channel: 'social', periodFrom: '1405/06/20', periodTo: '1405/07/19', evalCount: 10, score: 70, team: 'T' }
+    ]
+  };
+  /* بازه‌ی قطعی: فقط ۱۰ روز از ماهانه تیکت هم‌پوشانی دارد */
+  const out = F.monthlySummary(db, { from: '1405/08/10', to: '1405/09/10' });
+  const row = out.rows.find((r) => r.agent === 'الف');
+  assert.equal(row.tickets, 13); // ۴۰ × ۱۰/۳۱ ≈ ۱۳
+  assert.equal(row.ticketAvg, 80);
+  assert.equal(row.socials, 0); // ماهانه سوشال قبلی بازه را پوشش نمی‌دهد
+  /* بازه کامل ماه مالی → ۴۰ */
+  const full = F.monthlySummary(db, { from: '1405/07/20', to: '1405/08/19' });
+  const frow = full.rows.find((r) => r.agent === 'الف');
+  assert.equal(frow.tickets, 40);
 });

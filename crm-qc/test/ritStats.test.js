@@ -378,3 +378,42 @@ test('آمار ریت: agentTotals برای هر کارشناس فروش در ب
   assert.equal(a2.total, 1);
   assert.equal(a2.team, 'Account');
 });
+
+/* ------------------------------------------------------------- پروریشن بازه (هم‌پوشانی) */
+test('آمار ریت: رکوردهای ماهانه فقط سهم هم‌پوشانی بازه را در جمع ریت می‌گیرند', () => {
+  /* ریت ماهانه با بازه‌ی ۲۰→۱۹؛ بازه‌ی انتخاب‌شده فقط ۱۰ روز از آن را پوشش می‌دهد */
+  const db = {
+    callFeedbacks: [
+      { expertName: 'الف', qcAgent: 'کیوسی ۱', reviewDate: '1405/08/15', team: 'اکانت', formType: 'tele', sourceFile: 'f1.xlsx' }
+    ],
+    monthlyScores: [
+      { expertName: 'الف', channel: 'ticket', periodFrom: '1405/07/20', periodTo: '1405/08/19', team: 'اکانت', evalCount: 40 },
+      { expertName: 'الف', channel: 'social', periodFrom: '1405/06/20', periodTo: '1405/07/19', team: 'اکانت', evalCount: 10 }
+    ]
+  };
+  /* بازه: 1405/08/10 → 1405/09/10 — ماهانه أول فقط ۱۰ روز از ۳۱ روز بازه‌اش هم‌پوشانی دارد */
+  const out = Rit.stats(db, { from: '1405/08/10', to: '1405/09/10' });
+  assert.equal(out.totals.all, 14); // ۱۳ (۴۰ × ۱۰/۳۱ ≈ ۱۲٫۹) + ۱ تماس در بازه
+  const tm = out.teams.find((t) => t.team === 'اکانت');
+  assert.equal(tm.total, 14);
+  /* ماهانه قبل (۱405/06/20 → 1405/07/19) هیچ هم‌پوشانی ندارد — در جمع  gelmez */
+  assert.equal(out.totals.all, 14);
+  /* بازه‌ی کامل ماه مالی → تمام ۴۰ ریت ماهانه حساب می‌شود (ماهانه قبلی بازه را پوشش نمی‌دهد) */
+  const full = Rit.stats(db, { from: '1405/07/20', to: '1405/08/19' });
+  assert.equal(full.totals.all, 40 + 1); // ۴۰ ماهانه + ۱ تماس در بازه
+  /* تماس تک‌تاریخ در بازه حساب می‌شود */
+  assert.equal(full.totals.calls, 1);
+});
+
+test('آمار ریت: ماهTeamTotal رکوردهای ماهانه را بر اساس هم‌پوشانی ماه مالی محاسبه می‌کند', () => {
+  const db = {
+    fiscalMonths: [{ id: 'fm1', name: 'ماه مالی آبان', from: '1405/07/20', to: '1405/08/19' }],
+    monthlyScores: [
+      { expertName: 'الف', channel: 'ticket', periodFrom: '1405/08/10', periodTo: '1405/09/10', team: 'اکانت', evalCount: 30 },
+      { expertName: 'الف', channel: 'social', periodFrom: '1405/07/20', periodTo: '1405/08/19', team: 'اکانت', evalCount: 12 }
+    ]
+  };
+  /* ماهانه أول فقط ۱۰ روز از ۳۲ روز بازه‌اش (۱405/08/10 → 1405/09/10) در ماه مالی آبان قرار دارد */
+  const total = Rit.monthTeamTotal(db, 'fm1', 'اکانت');
+  assert.equal(total, 9 + 12); // ۳۰ × ۱۰/۳۲ ≈ ۹٫۴ → ۹ + ۱۲
+});

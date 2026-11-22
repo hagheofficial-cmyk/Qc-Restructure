@@ -46,6 +46,54 @@ function monthOf(value) {
   return { jy: j.jy, jm: j.jm, key: j.jy + '/' + ('0' + j.jm).slice(-2), label: C.jalaliMonthLabel(j.jy, j.jm) };
 }
 
+/* ----------------------------------------------------------- هم‌پوشانی بازه (proration)
+ * رکوردهای دوره‌دار (ماهانه/موقعیتی) بازه‌ی [periodFrom, periodTo] دارند. وقتی
+ * بازه‌ی انتخاب‌شده فقط بخشی از آن بازه را پوشش می‌دهد، فقط سهم هم‌پوشانی
+ * آن در جمع/نمره حساب می‌شود — نمره و تعداد ماه مالی قبل باقي نمی‌ماند. */
+function dayDiff(start, end) {
+  if (!start || !end) return 0;
+  let s = { jy: start.jy, jm: start.jm, jd: start.jd }, e = { jy: end.jy, jm: end.jm, jd: end.jd };
+  let days = 0;
+  while (C.jalaliCmp(s, e) < 0) {
+    s = jalaliNextDay(s);
+    days++;
+  }
+  return days;
+}
+function jalaliNextDay(d) {
+  let jd = d.jd + 1, days = jalaliDaysInMonth(d.jy, d.jm);
+  if (jd > days) {
+    let jm = d.jm + 1, jy = d.jy;
+    if (jm > 12) { jm = 1; jy += 1; }
+    return { jy: jy, jm: jm, jd: 1 };
+  }
+  return { jy: d.jy, jm: d.jm, jd: jd };
+}
+function jalaliDaysInMonth(jy, jm) {
+  const r = (jy - 474) % 33;
+  const leap = r === 5 || r === 9 || r === 13 || r === 17 || r === 22 || r === 26 || r === 30;
+  if (jm <= 6) return 31;
+  if (jm <= 11) return leap ? 30 : 31;
+  return leap ? 30 : 29;
+}
+/* کسرِ هم‌پوشانی بازه‌ی رکورد با فیلتر: ۱ بدون فیلتر، ۰ بدون هم‌پوشانی،
+ * در غیر این صورت تعداد روز هم‌پوشانی بر طول بازه‌ی رکورد. */
+function overlapFraction(periodFrom, periodTo, from, to) {
+  if (!from && !to) return 1;
+  const a = C.parseDate(periodFrom);
+  const b = C.parseDate(periodTo || periodFrom);
+  if (!a || !b) return 0;
+  if (C.jalaliCmp(a, b) > 0) return 0;
+  const f = from ? C.parseDate(from) : null, t = to ? C.parseDate(to) : null;
+  if (f && C.jalaliCmp(b, f) < 0) return 0;
+  if (t && C.jalaliCmp(a, t) > 0) return 0;
+  const s = (f && C.jalaliCmp(f, a) > 0) ? f : a;
+  const e = (t && C.jalaliCmp(t, b) < 0) ? t : b;
+  const total = dayDiff(a, b) + 1;
+  const ov = dayDiff(s, e) + 1;
+  return total > 0 ? Math.min(1, Math.max(0, ov / total)) : 0;
+}
+
 /* ------------------------------------------------------------- ماه مالی */
 function normalizeMonths(rows) {
   const out = [];
@@ -194,26 +242,41 @@ function monthlySummary(db, opts) {
     const refDate = r && (r.periodTo || r.periodFrom);
     const j = C.parseDate(refDate);
     if (!j) return;
-    if (from && C.jalaliCmp(j, from) < 0) return;
-    if (to && C.jalaliCmp(j, to) > 0) return;
+    /* رکوردهای موقعیتی دوره‌دار: فقط سهم هم‌پوشانی بازه حساب می‌شود */
+    let ovf = 1;
+    if (r.periodFrom && r.periodTo) {
+      ovf = overlapFraction(r.periodFrom, r.periodTo, from, to);
+      if (ovf <= 0) return;
+    } else {
+      if (from && C.jalaliCmp(j, from) < 0) return;
+      if (to && C.jalaliCmp(j, to) > 0) return;
+    }
     const m = monthOf(refDate); const name = text(r.expertName);
     if (!m || !name) return;
     const g = ensure(m, name, r.team);
     if (r.situationalScore !== '' && r.situationalScore != null && Number.isFinite(Number(r.situationalScore))) {
-      g.situationalRows.push({ score: Number(r.situationalScore), w: (Number(r.formsCount) > 0 ? Number(r.formsCount) : 1) });
+      g.situationalRows.push({ score: Number(r.situationalScore), w: Math.max(0, Math.round((Number(r.formsCount) > 0 ? Number(r.formsCount) : 1) * ovf)) });
     }
   });
   ((db && db.monthlyScores) || []).forEach((r) => {
     const refDate = r && (r.periodTo || r.periodFrom);
     const j = C.parseDate(refDate);
     if (!j) return;
-    if (from && C.jalaliCmp(j, from) < 0) return;
-    if (to && C.jalaliCmp(j, to) > 0) return;
+    /* رکوردهای ماهانه دوره‌دار: فقط سهم هم‌پوشانی بازه حساب می‌شود
+     * (تا نمره و تعداد ماه مالی قبل باقي نماند). */
+    let ovf = 1;
+    if (r.periodFrom && r.periodTo) {
+      ovf = overlapFraction(r.periodFrom, r.periodTo, from, to);
+      if (ovf <= 0) return;
+    } else {
+      if (from && C.jalaliCmp(j, from) < 0) return;
+      if (to && C.jalaliCmp(j, to) > 0) return;
+    }
     const m = monthOf(refDate); const name = text(r.expertName);
     if (!m || !name) return;
     const g = ensure(m, name, r.team);
     if (r.score !== '' && r.score != null && Number.isFinite(Number(r.score))) {
-      const entry = { score: Number(r.score), w: (Number(r.evalCount) > 0 ? Number(r.evalCount) : 1) };
+      const entry = { score: Number(r.score), w: Math.max(0, Math.round((Number(r.evalCount) > 0 ? Number(r.evalCount) : 1) * ovf)) };
       if (r.channel === 'ticket') g.monthlyTicketRows.push(entry);
       else if (r.channel === 'social') g.monthlySocialRows.push(entry);
     }

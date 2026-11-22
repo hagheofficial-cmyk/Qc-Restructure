@@ -27,6 +27,56 @@
     return !!j && C.jalaliInRange(j, from ? C.parseDate(from) : null, to ? C.parseDate(to) : null);
   }
 
+  /* ----------------------------------------------------------- هم‌پوشانی بازه (proration)
+   * رکوردهای دوره‌دار (ماهانه تیکت/سوشال، موقعیتی) بازه‌ی [periodFrom, periodTo] دارند.
+   * وقتی بازه‌ی انتخاب‌شده فقط بخشی از آن بازه را پوشش می‌دهد، نباید رکورد کامل
+   * در محاسبه جوز شود (نمره ماه مالی قبل باقي می‌ماند). در این صورت فقط سهم
+   * هم‌پوشانی آن (تعداد روز هم‌پوشانی / طول دوره) لحاظ می‌شود. */
+  /* تفاضل روزهای دو تاریخ جلالی (end - start). */
+  function dayDiff(start, end) {
+    if (!start || !end) return 0;
+    var s = { jy: start.jy, jm: start.jm, jd: start.jd }, e = { jy: end.jy, jm: end.jm, jd: end.jd };
+    var days = 0;
+    while (C.jalaliCmp(s, e) < 0) {
+      s = jalaliNextDay(s);
+      days++;
+    }
+    return days;
+  }
+  function jalaliNextDay(d) {
+    var jd = d.jd + 1, days = jalaliDaysInMonth(d.jy, d.jm);
+    if (jd > days) {
+      var jm = d.jm + 1, jy = d.jy;
+      if (jm > 12) { jm = 1; jy += 1; }
+      return { jy: jy, jm: jm, jd: 1 };
+    }
+    return { jy: d.jy, jm: d.jm, jd: jd };
+  }
+  function jalaliDaysInMonth(jy, jm) {
+    /* سال کبیسه جلالی: سال‌های (jy-474) % 33 ∈ {5,9,13,17,22,26,30}. */
+    var r = (jy - 474) % 33;
+    var leap = r === 5 || r === 9 || r === 13 || r === 17 || r === 22 || r === 26 || r === 30;
+    if (jm <= 6) return 31;
+    if (jm <= 11) return leap ? 30 : 31;
+    return leap ? 30 : 29;
+  }
+  /* کسرِ هم‌پوشانی بازه‌ی رکورد با فیلتر: ۱ بدون فیلتر، ۰ بدون هم‌پوشانی،
+   * و در غیر این صورت تعداد روز هم‌پوشانی بر طول بازه‌ی رکورد. */
+  function overlapFraction(periodFrom, periodTo, from, to) {
+    if (!from && !to) return 1;
+    var a = C.parseDate(periodFrom), b = periodTo ? C.parseDate(periodTo) : a;
+    if (!a || !b) return 0;
+    if (C.jalaliCmp(a, b) > 0) return 0;
+    var f = from ? C.parseDate(from) : null, t = to ? C.parseDate(to) : null;
+    if (f && C.jalaliCmp(b, f) < 0) return 0;
+    if (t && C.jalaliCmp(a, t) > 0) return 0;
+    var s = (f && C.jalaliCmp(f, a) > 0) ? f : a;
+    var e = (t && C.jalaliCmp(t, b) < 0) ? t : b;
+    var total = dayDiff(a, b) + 1;
+    var ov = dayDiff(s, e) + 1;
+    return total > 0 ? Math.min(1, Math.max(0, ov / total)) : 0;
+  }
+
   function valueSet(value) {
     if (!value) return null;
     var list = (Array.isArray(value) ? value : String(value).split(',')).map(String).filter(Boolean);
@@ -96,11 +146,19 @@
       var match = P.resolveExpert(data.agents, r.expertName).agent;
       return match && match.name !== r.expertName ? Object.assign({}, r, { expertName: match.name }) : r;
     }).filter(function (r) {
-      if ((q.from || q.to) && !periodOverlaps(r.periodFrom, r.periodTo, q.from, q.to)) return false;
+      /* رکوردهای موقعیتی دوره‌دار: فقط سهم هم‌پوشانی بازه حساب می‌شود */
+      var ovf = overlapFraction(r.periodFrom, r.periodTo, q.from, q.to);
+      if (ovf <= 0) return false;
       if (q.form && r.formType !== q.form) return false;
       if (teamSet && !teamSet.has(P.teamKey(rowTeam(data, r)))) return false;
       if (agentSet && !agentSet.has(r.expertName)) return false;
       return true;
+    }).map(function (r) {
+      var ovf = overlapFraction(r.periodFrom, r.periodTo, q.from, q.to);
+      if (ovf >= 1) return r;
+      var out = Object.assign({}, r, { _ovf: ovf, formsCountRaw: r.formsCount });
+      out.formsCount = Math.max(0, Math.round((Number(r.formsCount) > 0 ? Number(r.formsCount) : 1) * ovf));
+      return out;
     });
   }
 
@@ -116,10 +174,18 @@
     var agentSet = valueSet(q.agent);
     return (data && data.monthlyScores || []).filter(function (r) {
       if (channel && r.channel !== channel) return false;
-      if (!periodOverlaps(r.periodFrom, r.periodTo, q.from, q.to)) return false;
+      /* رکوردهای ماهانه دوره‌دار: فقط سهم هم‌پوشانی بازه حساب می‌شود
+       * (تا نمره و تعداد ماه مالی قبل باقي نماند). */
+      if (overlapFraction(r.periodFrom, r.periodTo, q.from, q.to) <= 0) return false;
       if (teamSet && !teamSet.has(P.teamKey(rowTeam(data, r)))) return false;
       if (agentSet && !agentSet.has(r.expertName)) return false;
       return true;
+    }).map(function (r) {
+      var ovf = overlapFraction(r.periodFrom, r.periodTo, q.from, q.to);
+      if (ovf >= 1) return r;
+      var out = Object.assign({}, r, { _ovf: ovf, evalCountRaw: r.evalCount });
+      out.evalCount = Math.max(0, Math.round((Number(r.evalCount) > 0 ? Number(r.evalCount) : 1) * ovf));
+      return out;
     });
   }
 
