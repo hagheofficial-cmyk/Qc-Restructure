@@ -156,6 +156,7 @@
 
     const experts = new Map();
     const agents = new Map();
+    const agentTotal = new Map();
     const teams = new Map();
     const totals = { all: 0, calls: 0, tickets: 0, socials: 0, pivot: 0, withQc: 0 };
 
@@ -181,11 +182,16 @@
       if (r.file) ag.files.set(r.file, (ag.files.get(r.file) || 0) + 1);
 
       if (!agents.has(r.agent)) agents.set(r.agent, r.team);
+      agentTotal.set(r.agent, (agentTotal.get(r.agent) || 0) + r.count);
     });
 
     const agentList = Array.from(agents.entries())
       .map(([agent, team]) => ({ agent: agent, team: team }))
       .sort((a, b) => a.agent.localeCompare(b.agent, 'fa'));
+
+    const agentTotals = Array.from(agentTotal.entries())
+      .map(([agent, total]) => ({ agent: agent, team: agents.get(agent) || '', total: total }))
+      .sort((a, b) => b.total - a.total || a.agent.localeCompare(b.agent, 'fa'));
 
     const expertList = Array.from(experts.values()).map((ex) => ({
       qc: ex.qc,
@@ -203,6 +209,7 @@
       totals: Object.assign({ experts: expertList.length }, totals),
       experts: expertList,
       agents: agentList,
+      agentTotals: agentTotals,
       teams: Array.from(teams.entries()).map(([team, total]) => ({ team: team, total: total })).sort((a, b) => b.total - a.total)
     };
   }

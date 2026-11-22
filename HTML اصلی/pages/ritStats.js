@@ -1,4 +1,15 @@
-/* ritStats.js — داشبورد آمار ریت کارشناسان کیوسی بر اساس فایل‌های آپلودشده */
+/* ritStats.js — داشبورد آمار ریت کارشناسان کیوسی بر اساس فایل‌های آپلودشده
+ *
+ * تركیب صفحه:
+ *  - فیلترها + بازه‌ی تاریخ در بالای صفحه
+ *  - جدول پيورگ «تفکیک ریت — روبردار»: ردیف‌ها = کارشناسان فروش (عمودی)،
+ *    ستون‌ها = کارشناسان کیوسی (افقی)، هر سلول = تعداد ریت (تماس/تیکت/سوشال)
+ *    که از هر کارشناس فروش توسط هر کارشناس کیوسی در بازه انتخاب‌شده داده شده.
+ *    کلیک بر روی هر نام یا عدد، پاپ‌اپ دیتای اکسل با تمام ستون‌ها را باز می‌کند.
+ *  - نمودار: هر تیم را به کارشناسانش تفکیک کرده و تعداد ریت هر کارشناس را نشان می‌دهد.
+ *  - دکمه «تارگت ماهانه تیم‌ها» در بالای صفحه → پاپ‌اپ معیار تارگت.
+ *  - بخش «مرکز دیتا — فایل‌های آپلودشده» از این صفحه حذف شده (در تب مرکز داده قرار دارد).
+ */
 (function () {
 'use strict';
 const { C, $, $$, api, fa, esc, toast, emptyState } = UI;
@@ -22,6 +33,21 @@ function datePair(onChange) {
   return wrap;
 }
 
+/* رنگ‌های لبه‌ی نمودار (تکراری) */
+const CHART_COLORS = ['#4f9d69', '#5b8def', '#b06fd6', '#e08a3c', '#d9534f', '#3bb4b4',
+  '#7b68ee', '#f0ad4e', '#5cb85c', '#6fa8dc', '#cc7a9b', '#8e7cc3', '#5dade2', '#af7aa5'];
+
+/* نشان‌دهنده‌ی جزئیات ریت (تماس/تیکت/سوشال/پيورگ) در یک سلول */
+function channelBreakdown(forms) {
+  const parts = [];
+  const call = (forms.tele || 0) + (forms.account || 0) + (forms.mlm || 0);
+  if (call) parts.push(`<i class="fa-solid fa-phone" title="تماس" style="color:var(--good)">${fa(call)}</i>`);
+  if (forms.ticket) parts.push(`<i class="fa-solid fa-ticket" title="تیکت" style="color:var(--violet)">${fa(forms.ticket)}</i>`);
+  if (forms.social) parts.push(`<i class="fa-solid fa-comments" title="سوشال" style="color:var(--blue)">${fa(forms.social)}</i>`);
+  if (forms.pivot) parts.push(`<i class="fa-solid fa-table" title="پيورگ" style="color:var(--amber)">${fa(forms.pivot)}</i>`);
+  return parts.length ? `<div class="rt-ch">${parts.join(' ')}</div>` : '';
+}
+
 App.register('ritstats', {
   title: 'آمار ریت',
 
@@ -33,7 +59,7 @@ App.register('ritstats', {
         <div class="ph-ic"><i class="fa-solid fa-chart-column"></i></div>
         <div>
           <h2>آمار ریت</h2>
-          <p>شمارنده‌ی ریت‌های انجام‌شده بر اساس کارشناس کیوسی از فایل‌های آپلودشده + معیار تارگت ماهانه تیم‌ها</p>
+          <p>تفکیک ریت‌های انجام‌شده بر اساس کارشناس فروش × کارشناس کیوسی در بازه انتخاب‌شده</p>
         </div>
         <div class="spacer"></div>
         <div class="stat-strip">
@@ -54,33 +80,12 @@ App.register('ritstats', {
           <div id="rtTeamSlot"></div>
           <div id="rtQcSlot"></div>
           <button type="button" class="btn primary" id="rtApply"><i class="fa-solid fa-magnifying-glass"></i> اعمال فیلتر</button>
+          <button type="button" class="btn soft" id="rtTargetsBtn"><i class="fa-solid fa-bullseye"></i> تارگت ماهانه تیم‌ها</button>
         </div>
         <div class="note" id="rtRangeNote" style="margin-top:10px;display:none"></div>
       </div>
 
       <div id="rtContent"><div class="loading-page"><div class="spinner"></div><p>در حال دریافت آمار…</p></div></div>
-
-      <div class="card" style="margin-top:16px">
-        <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-bullseye"></i></div>
-          <div><h3>معیار تارگت ماهانه تیم‌ها</h3><div class="sub">تماس + سوشال + تیکت ترکیب‌شده؛ هر ماه مالی قابل تنظیم است</div></div>
-        </div>
-        <div id="rtTargets"><div class="loading-page"><div class="spinner"></div></div></div>
-      </div>
-
-      <div class="card" style="margin-top:16px">
-        <div class="card-head"><div class="head-icon" style="background:var(--blue-soft);color:var(--blue)"><i class="fa-solid fa-database"></i></div>
-          <div><h3>مرکز دیتا — فایل‌های آپلودشده</h3><div class="sub">فیلتر و مرتب‌سازی بر اساس بازه‌ی تاریخ، تیم و نام فایل</div></div>
-        </div>
-        <div class="filters plain" style="margin-bottom:12px">
-          <div class="field grow-0" id="rtFileRangeSlot"></div>
-          <div id="rtFileTeamSlot"></div>
-          <div class="field grow-1">
-            <label for="rtFileQ">جستجو در نام فایل</label>
-            <input class="input" id="rtFileQ" placeholder="نام فایل…" autocomplete="off">
-          </div>
-        </div>
-        <div id="rtFiles"><div class="loading-page"><div class="spinner"></div></div></div>
-      </div>
     `;
 
     /* ---------------- فیلترها ---------------- */
@@ -104,24 +109,13 @@ App.register('ritstats', {
     });
     $('#rtQcSlot', root).replaceWith(qcMs);
 
-    const fileTeamMs = UI.multiSelect({
-      label: 'تیم (مرکز دیتا)', allLabel: 'همه تیم‌ها',
-      items: (App.state.teams || []).slice().sort().map((t) => ({ value: t, label: QCParse.displayTeam(t) })),
-      onChange: () => loadFiles()
-    });
-    $('#rtFileTeamSlot', root).replaceWith(fileTeamMs);
-
-    const fileRangePair = datePair(loadFiles);
-    $('#rtFileRangeSlot', root).replaceWith(fileRangePair);
-
     fiscalSel.addEventListener('change', () => {
       const m = months.find((x) => x.id === fiscalSel.value);
       if (m) rangePair.setRange(m.from, m.to);
       load();
     });
     $('#rtApply', root).addEventListener('click', load);
-    const qDebounced = UI.debounce(() => loadFiles(), 350);
-    $('#rtFileQ', root).addEventListener('input', qDebounced);
+    $('#rtTargetsBtn', root).addEventListener('click', () => openTargetsModal());
 
     /* ---------------- ماه‌های مالی (۲۰ → ۱۹) ---------------- */
     try {
@@ -136,6 +130,7 @@ App.register('ritstats', {
     /* ---------------- آمار ریت ---------------- */
     const cont = $('#rtContent', root);
     let loadId = 0;
+    let teamChart = null;
 
     function currentRange() {
       return { from: rangePair.getFrom(), to: rangePair.getTo() };
@@ -147,6 +142,11 @@ App.register('ritstats', {
       if (r.from) return fa(r.from) + ' تا …';
       if (r.to) return '… تا ' + fa(r.to);
       return 'همه تاریخ‌ها';
+    }
+
+    function teamOf(name) {
+      const a = (App.state.agents || []).find((x) => x.name === name);
+      return a ? a.team : '';
     }
 
     async function load() {
@@ -177,95 +177,160 @@ App.register('ritstats', {
       $('#rtCntTickets').textContent = fa(d.totals.tickets);
       $('#rtCntSocials').textContent = fa(d.totals.socials);
 
+      /*་གཏོར graph را پیش از رندر جدید نابود کن */
+      if (teamChart) { try { teamChart.destroy(); } catch (e) {} teamChart = null; }
+
       if (!d.totals.all) {
         cont.innerHTML = `<div class="card">${emptyState('fa-inbox', 'بدون ریت در این بازه',
           'در بازه‌ی انتخابی هیچ ریت‌ی ثبت نشده است. بازه‌ی زمانی را تغییر دهید یا فایل‌های اکسل را آپلود کنید.')}</div>`;
         return;
       }
 
-      const agents = d.agents || [];
-      const teamOf = (name) => {
-        const a = (App.state.agents || []).find((x) => x.name === name);
-        return a ? a.team : '';
-      };
+      /* ------- matrix پيورگ: کارشناس فروش × کارشناس کیوسی ------- */
+      const qcCols = (d.experts || []).map((ex) => ex.qc);
+      const agentRows = (d.agentTotals || []).slice();
+      const matrix = {};
+      (d.experts || []).forEach((ex) => {
+        (ex.byAgent || []).forEach((ag) => {
+          matrix[ag.agent] = matrix[ag.agent] || {};
+          matrix[ag.agent][ex.qc] = { total: ag.total, forms: ag.forms };
+        });
+      });
 
-      /* پيورگ: کارشناسان کیوسی × کارشناسان فروش */
-      const pivot = agents.length
-        ? `<div class="table-wrap"><table class="tbl" style="font-size:12.5px">
-            <thead><tr><th style="min-width:150px">کارشناس کیوسی</th>${agents.map((a) =>
-              `<th style="min-width:64px;text-align:center" title="${esc(a.agent)} — ${esc(a.team || teamOf(a.agent) || '')}">${esc(a.agent)}</th>`).join('')}<th style="min-width:70px">جمع</th></tr></thead>
-            <tbody>${d.experts.map((ex) => {
-              const byAgent = new Map();
-              (ex.byAgent || []).forEach((ag) => byAgent.set(ag.agent, ag));
-              return `<tr>
-                <td class="cell-main"><b>${esc(ex.qc)}</b><br><small style="color:var(--muted)">ریت کل: ${fa(ex.total)}</small></td>
-                ${agents.map((a) => {
-                  const ag = byAgent.get(a.agent);
-                  const n = ag ? ag.total : 0;
-                  return `<td style="text-align:center">${n ? `<button type="button" class="rt-cell" data-qc="${esc(ex.qc)}" data-agent="${esc(a.agent)}" title="بازکردن ریت‌های دقیق"><b>${fa(n)}</b></button>` : '<span style="color:var(--muted)">—</span>'}</td>`;
-                }).join('')}
-                <td style="text-align:center"><b>${fa(ex.total)}</b></td>
-              </tr>`;
-            }).join('')}</tbody></table></div>`
-        : emptyState('fa-users', 'بدون کارشناس فروش', '');
+      const qcHeader = qcCols.length
+        ? qcCols.map((qc) => {
+          const ex = d.experts.find((x) => x.qc === qc);
+          return `<th style="min-width:84px;text-align:center" title="${esc(qc)} — ریت کل: ${fa(ex ? ex.total : 0)}">${esc(qc)}</th>`;
+        }).join('')
+        : '';
 
-      /* جدول تفکیک‌شده برای کارشناس کیوسی انتخاب‌شده */
-      let detail = '';
-      const selQc = qcSel[0] || (d.experts[0] && d.experts[0].qc) || '';
-      const ex = d.experts.find((x) => x.qc === selQc);
-      if (ex) {
-        detail = `
-          <div class="card" style="margin-top:16px">
-            <div class="card-head teal"><div class="head-icon"><i class="fa-solid fa-list-check"></i></div>
-              <div><h3>تفکیک ریت — ${esc(ex.qc)}</h3><div class="sub">تعداد فرم هر کارشناس فروش و فایل‌های منبع</div></div>
-            </div>
-            <div class="table-wrap">
-              <table class="tbl">
-                <thead><tr><th>کارشناس فروش</th><th>تیم</th><th>ریت کل</th><th>تماس</th><th>اکانت</th><th>MLM</th><th>تیکت</th><th>سوشال</th><th>پيورگ</th><th>فایل‌های منبع</th><th></th></tr></thead>
-                <tbody>${ex.byAgent.map((ag) => `<tr>
-                  <td class="cell-main">${esc(ag.agent)}</td>
-                  <td>${esc(ag.team || teamOf(ag.agent) || '—')}</td>
-                  <td><b>${fa(ag.total)}</b></td>
-                  <td>${ag.forms.tele || 0}</td>
-                  <td>${ag.forms.account || 0}</td>
-                  <td>${ag.forms.mlm || 0}</td>
-                  <td>${ag.forms.ticket || 0}</td>
-                  <td>${ag.forms.social || 0}</td>
-                  <td>${ag.forms.pivot || 0}</td>
-                  <td style="font-size:11.5px;color:var(--muted)">${(ag.files || []).map((f) => esc(f.file) + ' (' + fa(f.count) + ')').join('، ') || '—'}</td>
-                  <td><button type="button" class="btn soft sm rt-open" data-qc="${esc(ex.qc)}" data-agent="${esc(ag.agent)}"><i class="fa-solid fa-table"></i> بازکردن</button></td>
-                </tr>`).join('')}</tbody>
-              </table>
-            </div>
-          </div>`;
-      }
+      const bodyRows = agentRows.map((ag) => {
+        const cells = qcCols.map((qc) => {
+          const cell = matrix[ag.agent] && matrix[ag.agent][qc];
+          const n = cell ? cell.total : 0;
+          if (!n) return '<td style="text-align:center"><span style="color:var(--muted)">—</span></td>';
+          return `<td style="text-align:center"><button type="button" class="rt-cell" data-qc="${esc(qc)}" data-agent="${esc(ag.agent)}" title="بازکردن ریت‌های دقیق"><b>${fa(n)}</b>${channelBreakdown(cell.forms)}</button></td>`;
+        }).join('');
+        return `<tr>
+          <td class="cell-main"><button type="button" class="rt-agent" data-agent="${esc(ag.agent)}" title="بازکردن ریت‌های این کارشناس فروش"><b>${esc(ag.agent)}</b></button></td>
+          <td style="font-size:12px;color:var(--muted)">${esc(ag.team || teamOf(ag.agent) || '—')}</td>
+          ${cells}
+          <td style="text-align:center"><b>${fa(ag.total)}</b></td>
+        </tr>`;
+      }).join('');
+
+      const totalRow = qcCols.length ? `<tr>
+          <td class="cell-main"><b>جمع</b></td>
+          <td></td>
+          ${qcCols.map((qc) => {
+            const ex = d.experts.find((x) => x.qc === qc);
+            return `<td style="text-align:center"><b>${fa(ex ? ex.total : 0)}</b></td>`;
+          }).join('')}
+          <td style="text-align:center"><b>${fa(d.totals.all)}</b></td>
+        </tr>` : '';
+
+      const pivot = qcCols.length
+        ? `<div class="table-wrap" style="max-height:60vh;overflow:auto"><table class="tbl" style="font-size:12.5px">
+            <thead><tr><th style="min-width:150px">کارشناس فروش</th><th style="min-width:90px">تیم</th>${qcHeader}<th style="min-width:70px">جمع</th></tr></thead>
+            <tbody>${bodyRows}${totalRow}</tbody>
+          </table></div>`
+        : emptyState('fa-users', 'بدون کارشناس کیوسی', 'در این بازه هیچ کارشناس کیوسی‌ای ریت نکرده است.');
+
+      /* ------- نمودار: هر تیم به کارشناسانش تفکیک می‌شود ------- */
+      const chartCard = renderTeamChart(d, agentRows);
 
       cont.innerHTML = `
         <div class="card">
           <div class="card-head"><div class="head-icon"><i class="fa-solid fa-table-cells"></i></div>
-            <div><h3>ریت بر اساس کارشناس کیوسی و کارشناس فروش</h3>
-            <div class="sub">رفتن روی هر شمارش، ریت‌های دقیق آن کارشناس کیوسی و کارشناس فروش را باز می‌کند</div></div>
+            <div><h3>تفکیک ریت — روبردار</h3>
+            <div class="sub">رفتن روی هر نام یا شمارش، دیتای اکسل ریت‌های دقیق آن کارشناس فروش × کارشناس کیوسی را باز می‌کند</div></div>
           </div>
           ${pivot}
         </div>
-        ${detail}`;
+        ${chartCard}`;
 
-      $$('.rt-cell, .rt-open', cont).forEach((btn) => {
-        btn.addEventListener('click', () => openDrill(btn.dataset.qc, btn.dataset.agent || '', r));
+      $$('.rt-cell, .rt-agent', cont).forEach((btn) => {
+        btn.addEventListener('click', () => openDrill(btn.dataset.qc || '', btn.dataset.agent || '', r));
       });
+
+      /* ساخت نمودار روی canvas که در DOMقرار گرفته */
+      const canvas = $('#rtTeamChart', cont);
+      if (canvas && typeof Chart === 'function') {
+        teamChart = buildTeamChart(canvas, d, agentRows);
+      }
+    }
+
+    /* رندر کارت نمودار (HTML فقط؛ canvas ساخته می‌شود) */
+    function renderTeamChart(d, agentRows) {
+      const teams = (d.teams || []).map((t) => t.team);
+      const hasTeam = teams.length > 1 || (teams.length === 1 && agentRows.length > 0);
+      if (!agentRows.length || !hasTeam) {
+        return `<div class="card" style="margin-top:16px">
+          <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-chart-column"></i></div>
+            <div><h3>تفکیک ریت بر اساس تیم و کارشناس</h3>
+            <div class="sub">هر تیم به کارشناسانش تفکیک شده و تعداد ریت هر کارشناس نمایش داده می‌شود</div></div></div>
+          ${emptyState('fa-chart-column', 'نمودار آماده نیست', 'برای مشاهده نمودار، بازه‌ی زمانی را گسترده‌تر کنید یا داده‌ی بیشتری آپلود کنید.')}</div>`;
+      }
+      return `<div class="card" style="margin-top:16px">
+        <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-chart-column"></i></div>
+          <div><h3>تفکیک ریت بر اساس تیم و کارشناس</h3>
+          <div class="sub">هر تیم به کارشناسانش تفکیک شده و تعداد ریت هر کارشناس نمایش داده می‌شود</div></div>
+        </div>
+        <div class="chart-box" style="height:340px"><canvas id="rtTeamChart"></canvas></div>
+      </div>`;
+    }
+
+    /* ساخت Chart.js روی canvas */
+    function buildTeamChart(canvas, d, agentRows) {
+      const teamOrder = (d.teams || []).map((t) => t.team);
+      const experts = Array.from(new Set(agentRows.map((a) => a.agent)));
+      const datasets = experts.map((agent, i) => ({
+        label: agent,
+        data: teamOrder.map((team) => {
+          const a = agentRows.find((x) => x.agent === agent && x.team === team);
+          return a ? a.total : 0;
+        }),
+        backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+        borderRadius: 3,
+        stack: 'rt'
+      }));
+      const cfg = {
+        type: 'bar',
+        data: { labels: teamOrder, datasets: datasets },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            tooltip: { callbacks: { label: (c) => c.dataset.label + ': ' + fa(c.parsed.y) } }
+          },
+          scales: {
+            x: { stacked: true, grid: { display: false } },
+            y: { stacked: true, beginAtZero: true, ticks: { callback: (v) => fa(v) } }
+          }
+        }
+      };
+      try {
+        Chart.defaults.font.family = 'Vazirmatn';
+        Chart.defaults.color = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+        if (App.styleChart) App.styleChart(cfg.options);
+        return new Chart(canvas, cfg);
+      } catch (e) {
+        return null;
+      }
     }
 
     /* ---------------- بازکردن دیتای خام اکسل (دقیقاً همان‌طور که آپلود شده) ---------------- */
     async function openDrill(qc, agent, range) {
-      const m = UI.modal(`${UI.modalHead('ریت‌های دقیق — ' + qc + (agent ? ' / ' + agent : ''), 'fa-file-excel')}
+      const m = UI.modal(`${UI.modalHead('ریت‌های دقیق — ' + (agent || qc || ''), 'fa-file-excel')}
         <div class="modal-body">
           <div class="filters plain" style="margin-bottom:12px">
-            <div class="field grow-0"><label>کارشناس کیوسی</label><input class="input" id="drQc" value="${esc(qc)}" autocomplete="off"></div>
+            <div class="field grow-0"><label>کارشناس کیوسی</label><input class="input" id="drQc" value="${esc(qc)}" placeholder="اختیاری…" autocomplete="off"></div>
             <div class="field grow-0"><label>کارشناس فروش</label><input class="input" id="drAgent" value="${esc(agent)}" placeholder="نام کارشناس فروش…" autocomplete="off"></div>
             <div class="field grow-0"><label>از تاریخ</label><input class="input" id="drFrom" value="${esc(range && range.from || '')}" autocomplete="off" placeholder="1405/07/20"></div>
             <div class="field grow-0"><label>تا تاریخ</label><input class="input" id="drTo" value="${esc(range && range.to || '')}" autocomplete="off" placeholder="1405/08/19"></div>
             <div class="field grow-0"><label>تیم</label>
-              <select class="input" id="drTeam"><option value="">همه تیم‌ها</option>${(App.state.teams || []).map((t) => `<option value="${esc(t)}">${esc(QCParse.displayTeam(t))}</option>`).join('')}</select>
+              <select class="input" id="drTeam"><option value="">همه تیم‌ها</option>${(App.state.teams || []).map((t) => `<option value="${esc(t)}" ${teamOf(agent) === t ? 'selected' : ''}>${esc(QCParse.displayTeam(t))}</option>`).join('')}</select>
             </div>
             <button type="button" class="btn primary" id="drGo"><i class="fa-solid fa-magnifying-glass"></i> فیلتر</button>
           </div>
@@ -313,9 +378,7 @@ App.register('ritstats', {
       }
     }
 
-    /* ---------------- تارگت‌های ماهانه تیم‌ها ---------------- */
-    const targetsEl = $('#rtTargets', root);
-
+    /* ---------------- تارگت‌های ماهانه تیم‌ها (در پاپ‌اپ) ---------------- */
     function targetsTable(list) {
       return `
         <div class="table-wrap">
@@ -347,7 +410,7 @@ App.register('ritstats', {
             <select class="input" id="tgTeam"><option value="">انتخاب تیم…</option>${(App.state.teams || []).map((tm) => `<option value="${esc(tm)}">${esc(QCParse.displayTeam(tm))}</option>`).join('')}</select>
           </div>
           <div class="field grow-0"><label for="tgMonth">ماه مالی</label>
-            <select class="input" id="tgMonth"><option value="">انتخاب ماه…</option>${months.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
+            <select class="input" id="tgMonth"><option value="">انتخاب ماه…</option>${months.map((m) => `<option value="${esc(m.id)}" ${m.name === (months[0] && months[0].name) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
           </div>
           <div class="field grow-0"><label for="tgTarget">تارگت (تعداد ریت)</label>
             <input class="input" id="tgTarget" inputmode="numeric" placeholder="مثلاً 20" autocomplete="off">
@@ -359,176 +422,64 @@ App.register('ritstats', {
         </div>`;
     }
 
-    function bindTargets() {
+    function bindTargets(el) {
       if (!isAdmin) return;
-      $('#tgSave', targetsEl).addEventListener('click', async () => {
-        const team = $('#tgTeam', targetsEl).value;
-        const month = $('#tgMonth', targetsEl).value;
-        const target = $('#tgTarget', targetsEl).value.trim();
+      $('#tgSave', el).addEventListener('click', async () => {
+        const team = $('#tgTeam', el).value;
+        const month = $('#tgMonth', el).value;
+        const target = $('#tgTarget', el).value.trim();
         if (!team || !month) return toast.error('تیم و ماه مالی را انتخاب کنید');
         if (!/^\d+$/.test(target)) return toast.error('تارگت باید یک عدد باشد');
         try {
           const out = await api.put('/api/rit/targets', {
             team: team, month: month, target: Number(target),
-            note: $('#tgNote', targetsEl).value.trim()
+            note: $('#tgNote', el).value.trim()
           });
           toast.success('تارگت ذخیره شد');
-          renderTargets(out.targets);
+          renderTargetsInto(el, out.targets);
         } catch (e) {
           toast.error('خطا در ذخیره‌ی تارگت: ' + e.message);
         }
       });
-      $$('[data-del-target]', targetsEl).forEach((b) => b.addEventListener('click', async () => {
+      $$('[data-del-target]', el).forEach((b) => b.addEventListener('click', async () => {
         try {
           const out = await api.del('/api/rit/targets/' + encodeURIComponent(b.dataset.delTarget));
           toast.success('تارگت حذف شد');
-          renderTargets(out.targets);
+          renderTargetsInto(el, out.targets);
         } catch (e) {
           toast.error('خطا: ' + e.message);
         }
       }));
     }
 
-    function renderTargets(list) {
-      targetsEl.innerHTML = list.length
+    function renderTargetsInto(el, list) {
+      el.innerHTML = list.length
         ? targetsTable(list)
         : emptyState('fa-bullseye', 'هنوز تارگت تعریف نشده',
             'برای هر تیم و هر ماه مالی، تعداد ریت هدف را تعیین کنید.');
-      bindTargets();
+      bindTargets(el);
     }
 
-    async function loadTargets() {
+    async function openTargetsModal() {
+      const m = UI.modal(`${UI.modalHead('معیار تارگت ماهانه تیم‌ها', 'fa-bullseye')}
+        <div class="modal-body">
+          <div class="sub" style="margin:0 0 12px">تماس + سوشال + تیکت ترکیب‌شده؛ هر ماه مالی قابل تنظیم است</div>
+          <div id="rtTargetsM"><div class="loading-page"><div class="spinner"></div></div></div>
+        </div>`, { lg: true });
+      await loadTargetsInto($('#rtTargetsM', m));
+    }
+
+    async function loadTargetsInto(el) {
       try {
         const t = await api.get('/api/rit/targets');
-        renderTargets((t && t.targets) || []);
+        renderTargetsInto(el, (t && t.targets) || []);
       } catch (e) {
-        targetsEl.innerHTML = emptyState('fa-triangle-exclamation', 'خطا', e.message);
+        el.innerHTML = emptyState('fa-triangle-exclamation', 'خطا', e.message);
       }
-    }
-
-    /* ---------------- مرکز دیتا ---------------- */
-    const filesEl = $('#rtFiles', root);
-    let fileSort = { key: 'name', dir: 'asc' };
-
-    async function loadFiles() {
-      const qs = [];
-      const fFrom = fileRangePair.getFrom();
-      const fTo = fileRangePair.getTo();
-      if (fFrom) qs.push('from=' + encodeURIComponent(fFrom));
-      if (fTo) qs.push('to=' + encodeURIComponent(fTo));
-      const teamSel = fileTeamMs.getValues();
-      if (teamSel.length) qs.push('team=' + encodeURIComponent(teamSel.join(',')));
-      const q = $('#rtFileQ', root).value.trim();
-      if (q) qs.push('q=' + encodeURIComponent(q));
-      qs.push('sort=' + encodeURIComponent(fileSort.key));
-      qs.push('dir=' + encodeURIComponent(fileSort.dir));
-      try {
-        const out = await api.get('/api/rit/files?' + qs.join('&'));
-        const files = (out && out.files) || [];
-        if (!files.length) {
-          filesEl.innerHTML = emptyState('fa-inbox', 'فایلی یافت نشد',
-            'با این فیلترها هیچ فایلی وجود ندارد. فیلترها را تغییر دهید یا فایل‌های اکسل را آپلود کنید.');
-          return;
-        }
-        const kindMeta = {
-          form: { label: 'فرم تماس', cls: 'good' },
-          situational: { label: 'موقعیتی', cls: 'blue' },
-          monthly: { label: 'ماهانه', cls: 'blue' },
-          ticket: { label: 'تیکت', cls: 'violet' },
-          social: { label: 'سوشال', cls: 'violet' },
-          pivot: { label: 'پيورگ ریت', cls: 'amber' }
-        };
-        const arrow = (k) => (fileSort.key === k ? (fileSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
-        const th = (k, label) => `<th class="rt-sort" data-sort="${k}" style="cursor:pointer">${label}${arrow(k)}</th>`;
-        filesEl.innerHTML = `
-          <div class="note" style="margin:0 0 8px"><i class="fa-solid fa-database"></i> <b>${fa(out.total)}</b> فایل منبع — کلیک بر روی هر فایل، دیتای خامِ اکسل را باز می‌کند</div>
-          <div class="table-wrap">
-            <table class="tbl" style="font-size:12.5px">
-              <thead><tr>${th('name', 'نام فایل')}${th('team', 'تیم')}${th('from', 'از')}${th('to', 'تا')}${th('rows', 'ردیف‌ها')}<th>دسته</th><th>کارشناسان کیوسی</th></tr></thead>
-              <tbody>${files.map((f) => {
-                const km = kindMeta[f.kind] || kindMeta.form;
-                return `<tr>
-                  <td><button type="button" class="rt-file" data-file="${esc(f.name)}" style="text-align:left;font-family:monospace;font-size:11.5px;word-break:break-all"><i class="fa-solid fa-file-excel" style="color:var(--good);margin-left:4px"></i>${esc(f.name)}</button></td>
-                  <td style="font-size:12px">${(f.teams || []).map(esc).join('، ') || '—'}</td>
-                  <td dir="ltr" style="white-space:nowrap">${esc(f.from || '—')}</td>
-                  <td dir="ltr" style="white-space:nowrap">${esc(f.to || '—')}</td>
-                  <td><b>${fa(f.rows)}</b></td>
-                  <td><span class="badge ${km.cls}">${km.label}</span></td>
-                  <td style="font-size:11.5px;color:var(--muted)">${(f.qcAgents || []).slice(0, 4).map(esc).join('، ') || '—'}${(f.qcAgents || []).length > 4 ? ' +' : ''}</td>
-                </tr>`;
-              }).join('')}</tbody>
-            </table>
-          </div>`;
-        $$('.rt-sort', filesEl).forEach((thEl) => thEl.addEventListener('click', () => {
-          const k = thEl.dataset.sort;
-          if (fileSort.key === k) fileSort.dir = fileSort.dir === 'asc' ? 'desc' : 'asc';
-          else { fileSort.key = k; fileSort.dir = 'asc'; }
-          loadFiles();
-        }));
-        $$('.rt-file', filesEl).forEach((btn) => btn.addEventListener('click', () => openFileModal(btn.dataset.file)));
-      } catch (e) {
-        filesEl.innerHTML = emptyState('fa-triangle-exclamation', 'خطا', e.message);
-      }
-    }
-
-    async function openFileModal(name) {
-      const m = UI.modal(`${UI.modalHead('دیتای خام اکسل — ' + name, 'fa-file-excel')}
-        <div class="modal-body">
-          <div class="filters plain" style="margin-bottom:12px">
-            <div class="field grow-0"><label>کارشناس کیوسی</label><input class="input" id="flQc" placeholder="اختیاری…" autocomplete="off"></div>
-            <div class="field grow-0"><label>کارشناس فروش</label><input class="input" id="flAgent" placeholder="اختیاری…" autocomplete="off"></div>
-            <div class="field grow-0"><label>از تاریخ</label><input class="input" id="flFrom" autocomplete="off" placeholder="1405/07/20"></div>
-            <div class="field grow-0"><label>تا تاریخ</label><input class="input" id="flTo" autocomplete="off" placeholder="1405/08/19"></div>
-            <div class="field grow-0"><label>تیم</label>
-              <select class="input" id="flTeam"><option value="">همه تیم‌ها</option>${(App.state.teams || []).map((t) => `<option value="${esc(t)}">${esc(QCParse.displayTeam(t))}</option>`).join('')}</select>
-            </div>
-            <button type="button" class="btn primary" id="flGo"><i class="fa-solid fa-magnifying-glass"></i> فیلتر</button>
-          </div>
-          <div id="flOut"><div class="loading-page"><div class="spinner"></div></div></div>
-        </div>`, { lg: true });
-
-      async function fetchRows() {
-        const out = $('#flOut', m);
-        const qs = ['file=' + encodeURIComponent(name)];
-        const qcv = $('#flQc', m).value.trim();
-        const agv = $('#flAgent', m).value.trim();
-        const frv = $('#flFrom', m).value.trim();
-        const tov = $('#flTo', m).value.trim();
-        const tv = $('#flTeam', m).value;
-        if (qcv) qs.push('qc=' + encodeURIComponent(qcv));
-        if (agv) qs.push('agent=' + encodeURIComponent(agv));
-        if (frv) qs.push('from=' + encodeURIComponent(frv));
-        if (tov) qs.push('to=' + encodeURIComponent(tov));
-        if (tv) qs.push('team=' + encodeURIComponent(tv));
-        try {
-          const r = await api.get('/api/rit/rows?' + qs.join('&'));
-          if (!out.isConnected) return;
-          if (!r.rows.length) {
-            out.innerHTML = emptyState('fa-file-circle-x', 'بدون ردیف',
-              r.total
-                ? 'فقط ' + fa(r.total) + ' ردیف با این فیلترها matching است؛ فیلترهای دیگری اعمال کنید.'
-                : 'دیتای خام برای این فایل ذخیره نشده است (ممکن است فایل قبل از این قابلیت آپلود شده باشد).');
-            return;
-          }
-          const head = (r.headers || []).map((h) => `<th>${esc(h)}</th>`).join('');
-          out.innerHTML = `
-            <div class="note" style="margin:0 0 8px"><i class="fa-solid fa-table"></i> <b>${fa(r.rows.length)}</b> ردیف نمایش‌داده‌شده از <b>${fa(r.total)}</b> ردیف فایل — تمام ستون‌ها به‌شکلِ اصلیِ اکسل آپلودشده</div>
-            <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="tbl" style="font-size:12px">
-              <thead><tr><th>#</th>${head}</tr></thead>
-              <tbody>${r.rows.map((row) => `<tr><td style="color:var(--muted)">${row.row}</td>${(r.headers || []).map((h) => `<td>${esc(row.cells[h] == null ? '' : row.cells[h])}</td>`).join('')}</tr>`).join('')}</tbody>
-            </table></div>`;
-        } catch (e) {
-          if (out.isConnected) out.innerHTML = emptyState('fa-triangle-exclamation', 'خطا', e.message);
-        }
-      }
-      $('#flGo', m).addEventListener('click', fetchRows);
-      await fetchRows();
     }
 
     /* ---------------- شروع ---------------- */
     await load();
-    await loadTargets();
-    await loadFiles();
   }
 });
 })();

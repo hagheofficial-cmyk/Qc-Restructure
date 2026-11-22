@@ -322,3 +322,21 @@ test('آمار ریت: fiscalLabelForRange ماه مالی‌ی با بیشتر�
   assert.equal(label2, 'ماه مالی آذر');
   assert.equal(Rit.fiscalLabelForRange(db, '', ''), '');
 });
+
+/* ------------------------------------------------------------- totals کارشناس فروش */
+test('آمار ریت: agentTotals برای هر کارشناس فروش در بازه محاسبه می‌شود', () => {
+  const db = fixture();
+  db.callFeedbacks = [
+    { expertName: 'کارشناس الف', team: 'Tele Sales', reviewDate: '1405/07/20', formType: 'tele', score: 80, qcAgent: 'کیوسی الف' },
+    { expertName: 'کارشناس الف', team: 'Tele Sales', reviewDate: '1405/07/21', formType: 'account', score: 70, qcAgent: 'کیوسی ب' },
+    { expertName: 'کارشناس ب', team: 'Account', reviewDate: '1405/07/22', formType: 'tele', score: 90, qcAgent: 'کیوسی الف' }
+  ];
+  db.tickets = [{ id: 1, agentName: 'کارشناس الف', team: 'Tele Sales', reviewDate: '1405/07/20', score: 60, qcAgent: 'کیوسی الف', ticketCode: 'T-1' }];
+  const d = Rit.stats(db, { from: '1405/07/20', to: '1405/08/19' });
+  const a1 = d.agentTotals.find((a) => a.agent === 'کارشناس الف');
+  assert.equal(a1.total, 3, 'کارشناس الف: ۲ تماس + ۱ تیکت = ۳ ریت');
+  assert.equal(a1.team, 'Tele Sales');
+  const a2 = d.agentTotals.find((a) => a.agent === 'کارشناس ب');
+  assert.equal(a2.total, 1);
+  assert.equal(a2.team, 'Account');
+});
