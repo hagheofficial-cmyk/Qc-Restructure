@@ -5106,7 +5106,11 @@ return {
           || /^مجموع$|^جمع|^میانگین|^total$|^average$/i.test(norm(agentCol ? cells[agentCol] : '')))) return;
         if (agentWant && !(agentCol && norm(cells[agentCol]) === agentWant)) return;
         if (allowed && agentCol && !allowed.some((a) => norm(cells[agentCol]) === a)) return;
-        if (teamWant && !(teamCol && norm(cells[teamCol]) === norm(teamWant))) return;
+        /* فیلتر تیم فقط وقتی اعمال می‌شود که فایل ستون تیم داشته باشد؛
+         * فایل‌های اکسل بدون ستون تیم (مثل أكثر فایل‌های تماس) هیچ اطلاعاتی از
+         * تیم ندارند — در این صورت فیلتر نادیده گرفته می‌شود تا پاپ‌آپ دیتای خام
+         * خالی نشود. */
+        if (teamWant && teamCol && norm(cells[teamCol]) !== norm(teamWant)) return;
         if (from || to) {
           const d = dateCol ? P.cleanQcDate(cells[dateCol]) : '';
           if (!inRange(d, from, to)) return;

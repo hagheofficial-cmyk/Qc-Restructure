@@ -829,3 +829,52 @@ table.profile-call-table { width:100%; min-width:0; table-layout:fixed; font-siz
 
 
 
+
+/* ===== آمار ریت — جدول پيورگ، سلول‌ها، كانال‌ها و نمایه ===== */
+.rt-matrix thead th { position: sticky; top: 0; z-index: 2; }
+.rt-matrix tbody tr:nth-child(even) td, .rt-agents tbody tr:nth-child(even) td { background: var(--soft); }
+.rt-matrix td, .rt-agents td { padding: 6px 8px; }
+.rt-matrix .rt-qc-name { font-weight: 700; color: var(--ink); line-height: 1.25; }
+.rt-matrix .rt-col-tot { font-size: 11px; color: var(--muted); font-weight: 700; }
+.rt-matrix .rt-row-tot, .rt-agents .rt-row-tot { text-align: center; }
+.rt-matrix .rt-row-tot b, .rt-agents .rt-row-tot b {
+  color: var(--brand); font-size: 13px; font-weight: 800;
+}
+.rt-matrix tfoot td { border-top: 2px solid var(--line); background: var(--panel-2); }
+.rt-matrix tfoot .rt-row-tot b, .rt-matrix tfoot td b { color: var(--ink); font-weight: 800; }
+.rt-cell {
+  display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; min-width: 56px; padding: 5px 9px; border-radius: 11px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--ink);
+  cursor: pointer; font-family: Vazirmatn; line-height: 1.15;
+  transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+.rt-cell:hover { border-color: var(--brand); background: var(--brand-soft); transform: translateY(-1px); }
+.rt-cell:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.rt-cell .rt-n { font-size: 15px; font-weight: 800; color: var(--ink); }
+.rt-ch { display: flex; gap: 5px; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 700; }
+.rt-ch i { font-style: normal; font-weight: 700; }
+.rt-ch [data-ch="tel"] { color: var(--good); }
+.rt-ch [data-ch="tic"] { color: var(--violet); }
+.rt-ch [data-ch="soc"] { color: #60a5fa; }
+.rt-ch [data-ch="piv"] { color: #f59e0b; }
+.rt-agent {
+  display: inline-flex; align-items: center; gap: 6px; border: 0; background: none;
+  cursor: pointer; padding: 2px 4px; border-radius: 8px; color: var(--ink);
+  font-family: Vazirmatn; font-size: inherit; text-align: left;
+}
+.rt-agent:hover b { color: var(--brand); }
+.rt-team-badge {
+  display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px;
+  font-weight: 700; color: var(--ink-2); background: var(--soft); border: 1px solid var(--line);
+}
+.rt-zero {
+  display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 700; color: var(--muted);
+  background: var(--soft); border: 1px dashed var(--line);
+}
+.rt-scroll { scrollbar-width: thin; }
+.rt-raw td { white-space: normal; }
+.rt-raw .rt-num { direction: ltr; font-weight: 700; }
+.rt-na { color: var(--muted); }
+.rt-date-pair { display: flex; gap: 10px; flex-wrap: wrap; }

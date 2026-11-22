@@ -5,8 +5,12 @@
  *  - جدول پيورگ «تفکیک ریت — روبردار»: ردیف‌ها = کارشناسان فروش (عمودی)،
  *    ستون‌ها = کارشناسان کیوسی (افقی)، هر سلول = تعداد ریت (تماس/تیکت/سوشال)
  *    که از هر کارشناس فروش توسط هر کارشناس کیوسی در بازه انتخاب‌شده داده شده.
- *    کلیک بر روی هر نام یا عدد، پاپ‌اپ دیتای اکسل با تمام ستون‌ها را باز می‌کند.
- *  - نمودار: هر تیم را به کارشناسانش تفکیک کرده و تعداد ریت هر کارشناس را نشان می‌دهد.
+ *    کلیک بر روی هر نام یا عدد، پاپ‌اپ دیتای اکسل با تمام ستون‌ها (با فرمت‌بندی
+ *    درست تاریخ و اعداد) را باز می‌کند.
+ *  - نمودار: هر تیم را به کارشناسانش تفکیک کرده و فقط کارشناسانی که ریت کرده‌اند
+ *    و تعداد ریت هر کارشناس را نشان می‌دهد.
+ *  - جدول «فهرست تمام کارشناسان»: همه‌ی کارشناسان فروش به‌همراه آن‌هایی که در
+ *    بازه ریت نکرده‌اند (ریت صفر) برای بررسی.
  *  - دکمه «تارگت ماهانه تیم‌ها» در بالای صفحه → پاپ‌اپ معیار تارگت.
  *  - بخش «مرکز دیتا — فایل‌های آپلودشده» از این صفحه حذف شده (در تب مرکز داده قرار دارد).
  */
@@ -41,11 +45,30 @@ const CHART_COLORS = ['#4f9d69', '#5b8def', '#b06fd6', '#e08a3c', '#d9534f', '#3
 function channelBreakdown(forms) {
   const parts = [];
   const call = (forms.tele || 0) + (forms.account || 0) + (forms.mlm || 0);
-  if (call) parts.push(`<i class="fa-solid fa-phone" title="تماس" style="color:var(--good)">${fa(call)}</i>`);
-  if (forms.ticket) parts.push(`<i class="fa-solid fa-ticket" title="تیکت" style="color:var(--violet)">${fa(forms.ticket)}</i>`);
-  if (forms.social) parts.push(`<i class="fa-solid fa-comments" title="سوشال" style="color:var(--blue)">${fa(forms.social)}</i>`);
-  if (forms.pivot) parts.push(`<i class="fa-solid fa-table" title="پيورگ" style="color:var(--amber)">${fa(forms.pivot)}</i>`);
-  return parts.length ? `<div class="rt-ch">${parts.join(' ')}</div>` : '';
+  if (call) parts.push(`<i class="fa-solid fa-phone" data-ch="tel" title="تماس (${fa(call)})">${fa(call)}</i>`);
+  if (forms.ticket) parts.push(`<i class="fa-solid fa-ticket" data-ch="tic" title="تیکت (${fa(forms.ticket)})">${fa(forms.ticket)}</i>`);
+  if (forms.social) parts.push(`<i class="fa-solid fa-comments" data-ch="soc" title="سوشال (${fa(forms.social)})">${fa(forms.social)}</i>`);
+  if (forms.pivot) parts.push(`<i class="fa-solid fa-table" data-ch="piv" title="پيورگ (${fa(forms.pivot)})">${fa(forms.pivot)}</i>`);
+  return parts.length ? `<div class="rt-ch">${parts.join('')}</div>` : '';
+}
+
+/* فرمت‌بندی مقدار یک سلول از دیتای خام اکسل:
+ * - تاریخ‌ها (ستون‌های date/تاریخ/review/action/created یا سریال اکسل) → تاریخ جلالی
+ * - اعداد → اعداد فارسی
+ * - رشته‌های کونتخوش‌دار (مثل "1") → حذف کونتخوش
+ */
+function fmtCell(h, v) {
+  if (v == null || v === '') return '<span class="rt-na">—</span>';
+  const isDate = /date|تاریخ|action|review|created/i.test(String(h));
+  if (typeof v === 'number') {
+    if (isDate) { const j = C.parseDate(v); if (j) return fa(C.formatJalali(j)); }
+    return '<span class="rt-num">' + fa(v) + '</span>';
+  }
+  const s = String(v).trim();
+  if (isDate) { const j = C.parseDate(s); if (j) return fa(C.formatJalali(j)); }
+  const out = s.replace(/^"+|"+$/g, '').trim();
+  if (/^-?\d+(\.\d+)?$/.test(out)) return '<span class="rt-num">' + fa(out) + '</span>';
+  return esc(out);
 }
 
 App.register('ritstats', {
@@ -177,7 +200,7 @@ App.register('ritstats', {
       $('#rtCntTickets').textContent = fa(d.totals.tickets);
       $('#rtCntSocials').textContent = fa(d.totals.socials);
 
-      /*་གཏོར graph را پیش از رندر جدید نابود کن */
+      /* نمودار پیشین را پیش از رندر جدید نابود کن */
       if (teamChart) { try { teamChart.destroy(); } catch (e) {} teamChart = null; }
 
       if (!d.totals.all) {
@@ -197,10 +220,26 @@ App.register('ritstats', {
         });
       });
 
+      /* درزه‌های ریت هر کارشناس فروش (برابر مجموعِ تمام کارشناسان کیوسی) */
+      const agentForms = {};
+      (d.experts || []).forEach((ex) => {
+        (ex.byAgent || []).forEach((ag) => {
+          agentForms[ag.agent] = agentForms[ag.agent] || {};
+          Object.keys(ag.forms || {}).forEach((f) => {
+            agentForms[ag.agent][f] = (agentForms[ag.agent][f] || 0) + (ag.forms[f] || 0);
+          });
+        });
+      });
+
+      /* کارشناسانی که ریت کرده‌اند (تنها برای نمودار) */
+      const ritsOnly = agentRows.filter((a) => (a.total || 0) > 0);
+
       const qcHeader = qcCols.length
         ? qcCols.map((qc) => {
           const ex = d.experts.find((x) => x.qc === qc);
-          return `<th style="min-width:84px;text-align:center" title="${esc(qc)} — ریت کل: ${fa(ex ? ex.total : 0)}">${esc(qc)}</th>`;
+          return `<th class="rt-qc-th" title="${esc(qc)} — ریت کل: ${fa(ex ? ex.total : 0)}">
+            <div class="rt-qc-name">${esc(qc)}</div>
+            <div class="rt-col-tot">${fa(ex ? ex.total : 0)}</div></th>`;
         }).join('')
         : '';
 
@@ -208,14 +247,14 @@ App.register('ritstats', {
         const cells = qcCols.map((qc) => {
           const cell = matrix[ag.agent] && matrix[ag.agent][qc];
           const n = cell ? cell.total : 0;
-          if (!n) return '<td style="text-align:center"><span style="color:var(--muted)">—</span></td>';
-          return `<td style="text-align:center"><button type="button" class="rt-cell" data-qc="${esc(qc)}" data-agent="${esc(ag.agent)}" title="بازکردن ریت‌های دقیق"><b>${fa(n)}</b>${channelBreakdown(cell.forms)}</button></td>`;
+          if (!n) return '<td><span class="rt-na">—</span></td>';
+          return `<td><button type="button" class="rt-cell" data-qc="${esc(qc)}" data-agent="${esc(ag.agent)}" title="ریت‌های دقیق — ${esc(qc)} → ${esc(ag.agent)}"><span class="rt-n">${fa(n)}</span>${channelBreakdown(cell.forms)}</button></td>`;
         }).join('');
         return `<tr>
-          <td class="cell-main"><button type="button" class="rt-agent" data-agent="${esc(ag.agent)}" title="بازکردن ریت‌های این کارشناس فروش"><b>${esc(ag.agent)}</b></button></td>
-          <td style="font-size:12px;color:var(--muted)">${esc(ag.team || teamOf(ag.agent) || '—')}</td>
+          <td class="cell-main"><button type="button" class="rt-agent" data-agent="${esc(ag.agent)}" title="ریت‌های این کارشناس فروش"><b>${esc(ag.agent)}</b></button></td>
+          <td><span class="rt-team-badge">${esc(ag.team || teamOf(ag.agent) || '—')}</span></td>
           ${cells}
-          <td style="text-align:center"><b>${fa(ag.total)}</b></td>
+          <td class="rt-row-tot"><b>${fa(ag.total)}</b></td>
         </tr>`;
       }).join('');
 
@@ -224,20 +263,24 @@ App.register('ritstats', {
           <td></td>
           ${qcCols.map((qc) => {
             const ex = d.experts.find((x) => x.qc === qc);
-            return `<td style="text-align:center"><b>${fa(ex ? ex.total : 0)}</b></td>`;
+            return `<td><b>${fa(ex ? ex.total : 0)}</b></td>`;
           }).join('')}
-          <td style="text-align:center"><b>${fa(d.totals.all)}</b></td>
+          <td class="rt-row-tot"><b>${fa(d.totals.all)}</b></td>
         </tr>` : '';
 
       const pivot = qcCols.length
-        ? `<div class="table-wrap" style="max-height:60vh;overflow:auto"><table class="tbl" style="font-size:12.5px">
+        ? `<div class="table-wrap rt-scroll" style="max-height:60vh"><table class="tbl rt-matrix" style="font-size:12.5px">
             <thead><tr><th style="min-width:150px">کارشناس فروش</th><th style="min-width:90px">تیم</th>${qcHeader}<th style="min-width:70px">جمع</th></tr></thead>
-            <tbody>${bodyRows}${totalRow}</tbody>
+            <tbody>${bodyRows}</tbody>
+            ${totalRow ? `<tfoot>${totalRow}</tfoot>` : ''}
           </table></div>`
         : emptyState('fa-users', 'بدون کارشناس کیوسی', 'در این بازه هیچ کارشناس کیوسی‌ای ریت نکرده است.');
 
+      /* ------- جدول تمام کارشناسان (با ریت‌های صفر) ------- */
+      const allCard = renderAgentsCard(d, agentRows, agentForms, teamSel, r);
+
       /* ------- نمودار: هر تیم به کارشناسانش تفکیک می‌شود ------- */
-      const chartCard = renderTeamChart(d, agentRows);
+      const chartCard = renderTeamChart(d, ritsOnly);
 
       cont.innerHTML = `
         <div class="card">
@@ -247,47 +290,88 @@ App.register('ritstats', {
           </div>
           ${pivot}
         </div>
-        ${chartCard}`;
+        ${chartCard}
+        ${allCard}`;
 
       $$('.rt-cell, .rt-agent', cont).forEach((btn) => {
         btn.addEventListener('click', () => openDrill(btn.dataset.qc || '', btn.dataset.agent || '', r));
       });
 
-      /* ساخت نمودار روی canvas که در DOMقرار گرفته */
+      /* ساخت نمودار روی canvas که در DOM قرار گرفته */
       const canvas = $('#rtTeamChart', cont);
-      if (canvas && typeof Chart === 'function') {
-        teamChart = buildTeamChart(canvas, d, agentRows);
+      if (canvas && typeof Chart === 'function' && ritsOnly.length) {
+        teamChart = buildTeamChart(canvas, d, ritsOnly);
       }
     }
 
+    /* ------- کارت جدول تمام کارشناسان (به‌همراه ریت‌های صفر) ------- */
+    function renderAgentsCard(d, agentRows, agentForms, teamSel, range) {
+      const seen = new Set();
+      const all = [];
+      const push = (name, team) => {
+        const nm = String(name || '').trim();
+        if (!nm || seen.has(nm)) return;
+        seen.add(nm);
+        all.push({ agent: nm, team: team || '' });
+      };
+      (App.state.agents || []).forEach((a) => push(a.name, a.team));
+      (agentRows || []).forEach((a) => push(a.agent, a.team || teamOf(a.agent)));
+      /* در صورت فیلتر تیم، فقط تیم‌های انتخاب‌شده نمایش داده می‌شود */
+      const wantTeams = teamSel && teamSel.length ? teamSel : null;
+      const rows = all.filter((a) => !wantTeams || wantTeams.indexOf(a.team) >= 0)
+        .map((a) => {
+          const hit = (agentRows || []).find((x) => x.agent === a.agent);
+          return { agent: a.agent, team: a.team || (hit ? hit.team : ''), total: hit ? hit.total : 0, forms: agentForms[a.agent] || {} };
+        })
+        .sort((x, y) => y.total - x.total || x.agent.localeCompare(y.agent, 'fa'));
+
+      const body = rows.map((ag) => {
+        const zero = !(ag.total > 0);
+        return `<tr>
+          <td class="cell-main"><button type="button" class="rt-agent" data-agent="${esc(ag.agent)}" title="ریت‌های این کارشناس فروش"><b>${esc(ag.agent)}</b></button>${zero ? '<span class="rt-zero">بدون ریت</span>' : ''}</td>
+          <td><span class="rt-team-badge">${esc(ag.team || '—')}</span></td>
+          <td class="rt-row-tot"><b>${fa(ag.total)}</b></td>
+          <td>${channelBreakdown(ag.forms)}</td>
+        </tr>`;
+      }).join('');
+
+      return `<div class="card" style="margin-top:16px">
+        <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-users"></i></div>
+          <div><h3>فهرست تمام کارشناسان</h3>
+          <div class="sub">همه‌ی کارشناسان فروش در این بازه — آن‌هایی که ریت نکرده‌اند هم نمایش داده می‌شوند؛ کلیک بر نام، دیتای اکسل را باز می‌کند</div></div>
+        </div>
+        <div class="table-wrap rt-scroll" style="max-height:46vh"><table class="tbl rt-agents" style="font-size:12.5px">
+          <thead><tr><th style="min-width:200px">کارشناس فروش</th><th style="min-width:110px">تیم</th><th style="min-width:80px">ریت کل</th><th>جزئیات</th></tr></thead>
+          <tbody>${body || `<tr><td colspan="4">${esc(emptyState('fa-users', 'بدون کارشناس', 'فهرست کارشناسان خالی است.'))}</td></tr>`}</tbody>
+        </table></div>
+        <div class="note" style="margin:8px 0 0"><i class="fa-regular fa-calendar-days"></i> بازه: <b>${esc(rangeText())}</b> — گره‌های «بدون ریت» در این بازه ریت ثبت نکرده‌اند</div>
+      </div>`;
+    }
+
     /* رندر کارت نمودار (HTML فقط؛ canvas ساخته می‌شود) */
-    function renderTeamChart(d, agentRows) {
+    function renderTeamChart(d, ritsOnly) {
       const teams = (d.teams || []).map((t) => t.team);
-      const hasTeam = teams.length > 1 || (teams.length === 1 && agentRows.length > 0);
-      if (!agentRows.length || !hasTeam) {
-        return `<div class="card" style="margin-top:16px">
-          <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-chart-column"></i></div>
-            <div><h3>تفکیک ریت بر اساس تیم و کارشناس</h3>
-            <div class="sub">هر تیم به کارشناسانش تفکیک شده و تعداد ریت هر کارشناس نمایش داده می‌شود</div></div></div>
+      const hasTeam = teams.length > 1 || (teams.length === 1 && ritsOnly.length > 0);
+      const head = `<div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-chart-column"></i></div>
+          <div><h3>تفکیک ریت بر اساس تیم و کارشناس</h3>
+          <div class="sub">هر تیم به کارشناسانش تفکیک شده و تعداد ریت هر کارشناس نمایش داده می‌شود (فقط کارشناسان ریت‌ده نمایش داده می‌شوند)</div></div>`;
+      if (!ritsOnly.length || !hasTeam) {
+        return `<div class="card" style="margin-top:16px">${head}
           ${emptyState('fa-chart-column', 'نمودار آماده نیست', 'برای مشاهده نمودار، بازه‌ی زمانی را گسترده‌تر کنید یا داده‌ی بیشتری آپلود کنید.')}</div>`;
       }
-      return `<div class="card" style="margin-top:16px">
-        <div class="card-head violet"><div class="head-icon"><i class="fa-solid fa-chart-column"></i></div>
-          <div><h3>تفکیک ریت بر اساس تیم و کارشناس</h3>
-          <div class="sub">هر تیم به کارشناسانش تفکیک شده و تعداد ریت هر کارشناس نمایش داده می‌شود</div></div>
-        </div>
+      return `<div class="card" style="margin-top:16px">${head}
         <div class="chart-box" style="height:340px"><canvas id="rtTeamChart"></canvas></div>
       </div>`;
     }
 
     /* ساخت Chart.js روی canvas */
-    function buildTeamChart(canvas, d, agentRows) {
+    function buildTeamChart(canvas, d, ritsOnly) {
       const teamOrder = (d.teams || []).map((t) => t.team);
-      const experts = Array.from(new Set(agentRows.map((a) => a.agent)));
+      const experts = Array.from(new Set(ritsOnly.map((a) => a.agent)));
       const datasets = experts.map((agent, i) => ({
         label: agent,
         data: teamOrder.map((team) => {
-          const a = agentRows.find((x) => x.agent === agent && x.team === team);
+          const a = ritsOnly.find((x) => x.agent === agent && x.team === team);
           return a ? a.total : 0;
         }),
         backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
@@ -362,16 +446,20 @@ App.register('ritstats', {
         if (!r.rows.length) {
           out.innerHTML = emptyState('fa-file-circle-x', 'بدون ردیف',
             r.total
-              ? 'فقط ' + fa(r.total) + ' ردیف با این فیلترها مطابق است؛ فیلترهای دیگری اعمال کنید.'
+              ? 'در مجموع ' + fa(r.total) + ' ردیف اکسل بررسی‌شد؛ فیلترهای دیگری اعمال کنید.'
               : 'ردیفی با این فیلترها در دیتای خام یافت نشد.');
           return;
         }
-        const head = (r.headers || []).map((h) => `<th>${esc(h)}</th>`).join('');
+        const head = (r.headers || []).map((h) => `<th title="${esc(h)}">${esc(h)}</th>`).join('');
         out.innerHTML = `
-          <div class="note" style="margin:0 0 8px"><i class="fa-solid fa-table"></i> <b>${fa(r.rows.length)}</b> ردیف نمایش‌داده‌شده از <b>${fa(r.total)}</b> ردیف مطابق — تمام ستون‌ها به‌شکلِ اصلیِ اکسل آپلودشده</div>
-          <div class="table-wrap" style="max-height:52vh;overflow:auto"><table class="tbl" style="font-size:12px">
-            <thead><tr><th>#</th>${head}</tr></thead>
-            <tbody>${r.rows.map((row) => `<tr><td style="color:var(--muted)">${row.row}</td>${(r.headers || []).map((h) => `<td>${esc(row.cells[h] == null ? '' : row.cells[h])}</td>`).join('')}</tr>`).join('')}</tbody>
+          <div class="note" style="margin:0 0 8px"><i class="fa-solid fa-table"></i> <b>${fa(r.rows.length)}</b> ردیف نمایش‌داده‌شده از <b>${fa(r.total)}</b> ردیف بررسی‌شده — تمام ستون‌های اکسل اصلی (تاریخ‌ها و اعداد فرمت‌بندی‌شده)</div>
+          <div class="table-wrap rt-scroll" style="max-height:52vh"><table class="tbl rt-raw" style="font-size:12px">
+            <thead><tr><th style="min-width:50px">ردیف</th><th style="min-width:150px">فایل</th>${head}</tr></thead>
+            <tbody>${r.rows.map((row) => `<tr>
+              <td style="color:var(--muted)">${row.row}</td>
+              <td style="color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(row.file)}">${esc(row.file)}</td>
+              ${(r.headers || []).map((h) => `<td>${fmtCell(h, row.cells[h])}</td>`).join('')}
+            </tr>`).join('')}</tbody>
           </table></div>`;
       } catch (e) {
         if (out.isConnected) out.innerHTML = emptyState('fa-triangle-exclamation', 'خطا', e.message);
@@ -381,7 +469,7 @@ App.register('ritstats', {
     /* ---------------- تارگت‌های ماهانه تیم‌ها (در پاپ‌اپ) ---------------- */
     function targetsTable(list) {
       return `
-        <div class="table-wrap">
+        <div class="table-wrap rt-scroll" style="max-height:44vh">
           <table class="tbl">
             <thead><tr><th>تیم</th><th>ماه مالی</th><th>تارگت (ریت)</th><th>انجام‌شده</th><th style="width:200px">پیشرفت</th><th>توضیح</th>${isAdmin ? '<th></th>' : ''}</tr></thead>
             <tbody>${list.map((row) => {
@@ -399,8 +487,7 @@ App.register('ritstats', {
               </tr>`;
             }).join('')}</tbody>
           </table>
-        </div>
-        ${isAdmin ? targetsForm() : ''}`;
+        </div>`;
     }
 
     function targetsForm() {
@@ -410,7 +497,7 @@ App.register('ritstats', {
             <select class="input" id="tgTeam"><option value="">انتخاب تیم…</option>${(App.state.teams || []).map((tm) => `<option value="${esc(tm)}">${esc(QCParse.displayTeam(tm))}</option>`).join('')}</select>
           </div>
           <div class="field grow-0"><label for="tgMonth">ماه مالی</label>
-            <select class="input" id="tgMonth"><option value="">انتخاب ماه…</option>${months.map((m) => `<option value="${esc(m.id)}" ${m.name === (months[0] && months[0].name) ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}</select>
+            <select class="input" id="tgMonth"><option value="">انتخاب ماه…</option>${months.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
           </div>
           <div class="field grow-0"><label for="tgTarget">تارگت (تعداد ریت)</label>
             <input class="input" id="tgTarget" inputmode="numeric" placeholder="مثلاً 20" autocomplete="off">
@@ -424,23 +511,26 @@ App.register('ritstats', {
 
     function bindTargets(el) {
       if (!isAdmin) return;
-      $('#tgSave', el).addEventListener('click', async () => {
-        const team = $('#tgTeam', el).value;
-        const month = $('#tgMonth', el).value;
-        const target = $('#tgTarget', el).value.trim();
-        if (!team || !month) return toast.error('تیم و ماه مالی را انتخاب کنید');
-        if (!/^\d+$/.test(target)) return toast.error('تارگت باید یک عدد باشد');
-        try {
-          const out = await api.put('/api/rit/targets', {
-            team: team, month: month, target: Number(target),
-            note: $('#tgNote', el).value.trim()
-          });
-          toast.success('تارگت ذخیره شد');
-          renderTargetsInto(el, out.targets);
-        } catch (e) {
-          toast.error('خطا در ذخیره‌ی تارگت: ' + e.message);
-        }
-      });
+      const save = $('#tgSave', el);
+      if (save) {
+        save.addEventListener('click', async () => {
+          const team = $('#tgTeam', el).value;
+          const month = $('#tgMonth', el).value;
+          const target = $('#tgTarget', el).value.trim();
+          if (!team || !month) return toast.error('تیم و ماه مالی را انتخاب کنید');
+          if (!/^\d+$/.test(target)) return toast.error('تارگت باید یک عدد باشد');
+          try {
+            const out = await api.put('/api/rit/targets', {
+              team: team, month: month, target: Number(target),
+              note: $('#tgNote', el).value.trim()
+            });
+            toast.success('تارگت ذخیره شد');
+            renderTargetsInto(el, out.targets);
+          } catch (e) {
+            toast.error('خطا در ذخیره‌ی تارگت: ' + e.message);
+          }
+        });
+      }
       $$('[data-del-target]', el).forEach((b) => b.addEventListener('click', async () => {
         try {
           const out = await api.del('/api/rit/targets/' + encodeURIComponent(b.dataset.delTarget));
@@ -453,10 +543,12 @@ App.register('ritstats', {
     }
 
     function renderTargetsInto(el, list) {
-      el.innerHTML = list.length
-        ? targetsTable(list)
-        : emptyState('fa-bullseye', 'هنوز تارگت تعریف نشده',
-            'برای هر تیم و هر ماه مالی، تعداد ریت هدف را تعیین کنید.');
+      /* برای admin: فرم اول، سپس جدول (تا بتوان تارگت جدید افزود بدون اسکرول) */
+      el.innerHTML = (isAdmin ? targetsForm() : '') +
+        (list.length
+          ? targetsTable(list)
+          : emptyState('fa-bullseye', 'هنوز تارگت تعریف نشده',
+              'برای هر تیم و هر ماه مالی، تعداد ریت هدف را تعیین کنید.'));
       bindTargets(el);
     }
 

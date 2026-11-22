@@ -146,6 +146,44 @@ test('آمار ریت: ردیف‌های خام اکسل بر اساس کارش�
   assert.equal(limited.total, 3);
 });
 
+test('آمار ریت: فیلتر تیم روی فایل بدون ستون تیم ردیف‌ها را حذف نمی‌کند', () => {
+  /* فایل اکسل خام تماس ستون تیم ندارد؛ در پاپ‌آپ دیتای خام فیلتر تیم
+   * نباید باعث خالی شدن خروجی شود. */
+  const db = {
+    ritRaw: {
+      'calls.xlsx': {
+        headers: ['expert_name', 'qc_expert_name', 'review_date'],
+        rows: [
+          { expert_name: 'الف', qc_expert_name: 'کیوسی ۱', review_date: '1405/07/21' },
+          { expert_name: 'ب', qc_expert_name: 'کیوسی ۱', review_date: '1405/07/22' }
+        ]
+      }
+    }
+  };
+  const byTeamNoCol = Rit.rawRows(db, { file: 'calls.xlsx', team: 'Tele sales' });
+  assert.equal(byTeamNoCol.rows.length, 2);
+  /* فیلتر qc/agent با وجود فقدان ستون تیم باز هم کار می‌کند */
+  const byQcTeam = Rit.rawRows(db, { file: 'calls.xlsx', qc: 'کیوسی ۱', team: 'Tele sales' });
+  assert.equal(byQcTeam.rows.length, 2);
+  const byAgent = Rit.rawRows(db, { file: 'calls.xlsx', agent: 'الف', team: 'Tele sales' });
+  assert.equal(byAgent.rows.length, 1);
+  /* فایل دارنده ستون تیم: فیلتر همچنان بر اساس مقدار اعمال می‌شود */
+  const db2 = {
+    ritRaw: {
+      'withTeam.xlsx': {
+        headers: ['expert_name', 'team'],
+        rows: [
+          { expert_name: 'الف', team: 'Tele sales' },
+          { expert_name: 'ب', team: 'اکانت' }
+        ]
+      }
+    }
+  };
+  const filtered = Rit.rawRows(db2, { file: 'withTeam.xlsx', team: 'Tele sales' });
+  assert.equal(filtered.rows.length, 1);
+  assert.equal(filtered.rows[0].cells.expert_name, 'الف');
+});
+
 /* ------------------------------------------------------------- تارگت */
 test('آمار ریت: ذخیره، بازسازی و حذف تارگت ماهانه با پیش‌رفت واقعی', () => {
   const db = {
